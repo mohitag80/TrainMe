@@ -23,6 +23,8 @@ The product brief is in [`Product_requirements.txt`](Product_requirements.txt).
 | 07 | [Phase 1 Activity Catalog](docs/07_Phase1_Activity_Catalog.md) | **Generated** knowledge base: cricket roles (batter, fast/spin bowler, keeper, fielder, all-rounder), tennis & badminton (no roles), football positions, athletics, shared conditioning, gym by muscle group; parameters, conditions, metrics, sources |
 | 08 | [Search & Query Performance](docs/08_Search_and_Query_Performance.md) | 10K-user workload model, search types → tables/indexes, DDL, query shapes, timeouts (< 5 s prod / < 2 s test), caching, Postgres tuning, verification plan, growth path |
 | 09 | [Design Patterns Guide](docs/09_Design_Patterns.md) | ~60 patterns used in TrainMe (architecture, messaging, data, resilience, security, observability, delivery, code, testing). Each has a beginner explanation, where it is used, why it was adopted, benefits and costs, the FR/NFR IDs it supports, quality attributes and learning links. Also covers patterns deliberately not used and a suggested learning order |
+| 10 | [Implementation Conventions](docs/10_Implementation_Conventions.md) | Toolchain pins and naming rules for code, APIs, database objects, events, config and secrets |
+| 11 | [Test Environment Runbook](docs/11_Test_Environment_Runbook.md) | **Start here for hands-on work**: URLs, deploy/update steps, test users, access tokens, creating users, API endpoints, database (DBeaver) access, Kafka/cache inspection, logs, smoke test, troubleshooting |
 
 ## UI mockups & demo video (`design/`)
 
