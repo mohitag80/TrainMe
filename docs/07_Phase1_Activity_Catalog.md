@@ -26,8 +26,55 @@ term      := {fn: COUNT | COUNT_TRUE | SUM | MAX | MIN, param: <key> | "*" | exp
 numerator := term | [term, term, …]          -- a list is summed (e.g. full_toss + long_hop)
 RATIO     := Σ numerator ÷ Σ denominator      -- additive → exact for day / week / month
 SINGLE    := Σ numerator  (or MAX/MIN, merged with GREATEST/LEAST across periods)
-display   := {format: NUMBER | PERCENT | DURATION | PACE, unit?, decimals, scale?}
+display   := {format: NUMBER | PERCENT | DURATION | PACE, unit?, rawUnit?, dimension?, decimals, scale?}
 ```
+
+### 1.2 Units of measure (ADR-014)
+
+Every measured parameter stores its values in one **canonical unit** (the *Type* column below, e.g. `speed_kmph` in km/h, `weight_kg` in kg). Users see and type values in the unit they choose: per dimension in their profile (Metric ↔ Imperial uses the *counterpart*), or per parameter in a tracker (any unit of the same dimension). Metrics carry `rawUnit` (what the formula yields) and a default display `unit`; ratios and percentages have none. Parameter keys keep their canonical-unit suffix because it names the stored unit, not the shown one.
+
+Conversion: `display = value × toBase(canonical) ÷ toBase(display)` – linear only, so sums, averages, maxima and ratios convert identically before or after aggregation.
+
+| Unit | Name | Dimension | toBase | System | Counterpart | Decimals | Step |
+|---|---|---|---|---|---|---|---|
+| `km/h` | kilometres per hour | speed | 0.277777777778 | METRIC | mph | 1 | 0.1 |
+| `mph` | miles per hour | speed | 0.44704 | IMPERIAL | km/h | 1 | 0.1 |
+| `m/s` | metres per second | speed | 1 | METRIC | ft/s | 2 | 0.1 |
+| `ft/s` | feet per second | speed | 0.3048 | IMPERIAL | m/s | 1 | 0.1 |
+| `kg` | kilograms | mass | 1 | METRIC | lb | 2 | 0.25 |
+| `g` | grams | mass | 0.001 | METRIC | oz | 0 | 1 |
+| `lb` | pounds | mass | 0.45359237 | IMPERIAL | kg | 1 | 0.5 |
+| `oz` | ounces | mass | 0.028349523125 | IMPERIAL | g | 1 | 0.5 |
+| `st` | stone | mass | 6.35029318 | IMPERIAL | kg | 2 | 0.1 |
+| `km` | kilometres | length | 1000 | METRIC | mi | 2 | 0.01 |
+| `m` | metres | length | 1 | METRIC | yd | 1 | 0.1 |
+| `cm` | centimetres | length | 0.01 | METRIC | in | 1 | 0.5 |
+| `mm` | millimetres | length | 0.001 | METRIC | in | 0 | 1 |
+| `mi` | miles | length | 1609.344 | IMPERIAL | km | 2 | 0.01 |
+| `yd` | yards | length | 0.9144 | IMPERIAL | m | 1 | 0.1 |
+| `ft` | feet | length | 0.3048 | IMPERIAL | m | 1 | 0.1 |
+| `in` | inches | length | 0.0254 | IMPERIAL | cm | 1 | 0.25 |
+| `ms` | milliseconds | duration | 0.001 | BOTH |  | 0 | 1 |
+| `s` | seconds | duration | 1 | BOTH |  | 2 | 0.01 |
+| `min` | minutes | duration | 60 | BOTH |  | 1 | 1 |
+| `h` | hours | duration | 3600 | BOTH |  | 2 | 0.25 |
+| `kcal` | kilocalories | energy | 1 | BOTH |  | 0 | 1 |
+| `kJ` | kilojoules | energy | 0.239005736138 | METRIC |  | 0 | 1 |
+| `ml` | millilitres | volume | 0.001 | METRIC | fl oz | 0 | 1 |
+| `l` | litres | volume | 1 | METRIC | qt | 2 | 0.05 |
+| `fl oz` | US fluid ounces | volume | 0.0295735295625 | IMPERIAL | ml | 1 | 0.5 |
+| `qt` | US quarts | volume | 0.946352946 | IMPERIAL | l | 2 | 0.05 |
+| `s/m` | seconds per metre (raw pace) | pace | 1 | BOTH |  | 3 |  |
+| `min/km` | minutes per kilometre | pace | 0.06 | METRIC | min/mi | 2 |  |
+| `min/mi` | minutes per mile | pace | 0.0372822715342 | IMPERIAL | min/km | 2 |  |
+| `reps` | repetitions | – (label only) |  |  |  |  |  |
+| `bpm` | beats per minute | – (label only) |  |  |  |  |  |
+| `rpm` | revolutions per minute | – (label only) |  |  |  |  |  |
+| `spm` | steps per minute | – (label only) |  |  |  |  |  |
+| `%` | percent | – (label only) |  |  |  |  |  |
+| `AU` | arbitrary units | – (label only) |  |  |  |  |  |
+
+Base units: speed = `m/s`, mass = `kg`, length = `m`, duration = `s`, energy = `kcal`, volume = `l`, pace = `s/m`.
 
 ---
 
@@ -218,8 +265,8 @@ Steady-state piece or one interval on a machine or outdoors.
 | Metric | Label | Kind | Formula | Display |
 |---|---|---|---|---|
 | `total_duration_s` | Total time | SINGLE | SUM(duration_s) | duration |
-| `total_distance_km` | Total distance | SINGLE | SUM(distance_m) | number km ×0.001 |
-| `avg_pace_s_per_km` | Average pace | RATIO | SUM(duration_s) ÷ SUM(distance_m) | pace min/km ×1000 |
+| `total_distance_km` | Total distance | SINGLE | SUM(distance_m) | number m → km |
+| `avg_pace_s_per_km` | Average pace | RATIO | SUM(duration_s) ÷ SUM(distance_m) | pace s/m → min/km |
 | `time_weighted_hr` | Average HR (time-weighted) | RATIO | SUM(avg_hr * duration_s) ÷ SUM(duration_s where avg_hr ≥ 1) | number bpm |
 | `calories` | Calories | SINGLE | SUM(calories) | number kcal |
 
@@ -1043,8 +1090,8 @@ _Search synonyms_: jog, long run, tempo run, easy run, road run
 | Metric | Label | Kind | Formula | Display |
 |---|---|---|---|---|
 | `total_duration_s` | Total time | SINGLE | SUM(duration_s) | duration |
-| `total_distance_km` | Total distance | SINGLE | SUM(distance_m) | number km ×0.001 |
-| `avg_pace_s_per_km` | Average pace | RATIO | SUM(duration_s) ÷ SUM(distance_m) | pace min/km ×1000 |
+| `total_distance_km` | Total distance | SINGLE | SUM(distance_m) | number m → km |
+| `avg_pace_s_per_km` | Average pace | RATIO | SUM(duration_s) ÷ SUM(distance_m) | pace s/m → min/km |
 | `time_weighted_hr` | Average HR (time-weighted) | RATIO | SUM(avg_hr * duration_s) ÷ SUM(duration_s where avg_hr ≥ 1) | number bpm |
 | `calories` | Calories | SINGLE | SUM(calories) | number kcal |
 
@@ -1062,7 +1109,7 @@ _Search synonyms_: splits, km split, 400 m lap, intervals
 
 | Metric | Label | Kind | Formula | Display |
 |---|---|---|---|---|
-| `avg_pace` | Average pace (work laps) | RATIO | SUM(time_s where is_work=true) ÷ SUM(distance_m where is_work=true) | pace min/km ×1000 |
+| `avg_pace` | Average pace (work laps) | RATIO | SUM(time_s where is_work=true) ÷ SUM(distance_m where is_work=true) | pace s/m → min/km |
 | `fastest_lap_s` | Fastest lap | SINGLE | MIN(time_s) | number s |
 
 ### Time Trial (1.6 km / 2 km / 5 km)  

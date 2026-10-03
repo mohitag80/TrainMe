@@ -4,7 +4,7 @@
 |---|---|
 | Product | TrainMe – personal activity, training and diet tracker |
 | Document | Software Requirements Specification |
-| Version | 1.2 – Phase 1 catalog knowledge base, search requirements for 10K users (1.1 granular live sessions; 1.0 baseline) |
+| Version | 1.3 – named sessions (many per day), editable units of measure (1.2 Phase 1 catalog, search for 10K users; 1.1 granular live sessions; 1.0 baseline) |
 | Date | 2026-10-03 |
 | Source | `Product_requirements.txt` |
 | Status | Draft for review |
@@ -50,10 +50,11 @@ The design keeps extension points for each of these (see HLD §10).
 | **Activity** | A thing that is recorded inside a template (e.g. *Delivery*, *Bench Press*, *Meal*). Has a **recording mode**. |
 | **Recording mode** | `PER_SESSION` (one row per session), `PER_SET` (one row per set), `PER_ATTEMPT` (one row per ball / meal / attempt). |
 | **Parameter** | A typed measurable field of an activity (e.g. `speed_kmph` DECIMAL, `yorker` BOOL, `reps` INT). |
+| **Unit / dimension** | A parameter measures a **dimension** (speed, mass, length, duration, energy, volume). Values are **stored** in one canonical unit per parameter (e.g. km/h, kg) and **shown** in the unit the user picks (mph, lb, g …). Counts such as reps, bpm and % have no alternative units. |
 | **Tracker** | A user's personal instance of a template plus their overrides. |
 | **Override** | User customisation: ADD / MODIFY / HIDE an activity or parameter, without changing the shared template. |
 | **Effective schema** | Template version ⊕ overrides, compiled to JSON Schema; drives forms and validation. |
-| **Session** | One practice / workout / day record for a tracker. Lifecycle `IN_PROGRESS → COMPLETED` (or `DISCARDED`), containing entries and values. |
+| **Session** | One practice or workout on one tracker, identified for the user by **session date + session name** (e.g. *3 Oct 2026 · Morning Nets*). A user can have any number of sessions per day, on the same or different trackers. Lifecycle `IN_PROGRESS → COMPLETED` (or `DISCARDED`), containing entries and values. |
 | **Entry** | One granular record inside a session: a ball, a set, a lap, a shot, a food item. Carries many parameter values. |
 | **Checkpoint** | A periodic background sync (every 3–5 min) that uploads new/edited entries of an in-progress session. |
 | **Condition** | Rule making a parameter visible/required only when another value matches (e.g. `yorker_accurate` when `yorker_attempted = true`). |
@@ -102,11 +103,12 @@ Priority uses **MoSCoW** (M = Must, S = Should, C = Could). Each requirement has
 
 | ID | Requirement | Priority | Acceptance criteria |
 |---|---|---|---|
-| FR-PRF-01 | Users create/edit a profile: display name, avatar, date of birth, gender (optional), height, weight, unit system (metric/imperial), timezone, locale. | M | Values validated; unit switch converts display only, never stored values. |
+| FR-PRF-01 | Users create/edit a profile: display name, avatar, date of birth, gender (optional), height, weight, unit preferences (FR-PRF-06), timezone, locale. | M | Values validated; unit switch converts display only, never stored values. |
 | FR-PRF-02 | Users choose one or more interests (e.g. Gym, Cricket, Diet) during onboarding to personalise the catalog. | S | Onboarding recommends matching templates. |
 | FR-PRF-03 | Users can **export** all their data (JSON / CSV). | M | Export ready within 24 h, download link valid 7 days. |
 | FR-PRF-04 | Users can **delete** their account and all personal data (right to erasure). | M | Personal data removed or crypto-shredded within 30 days; confirmation email sent. |
 | FR-PRF-05 | Users manage notification preferences (push, email, quiet hours). | S | Preferences honoured by notification service. |
+| FR-PRF-06 | Users set **Metric or Imperial per dimension**: speed (km/h ↔ mph), weight (kg ↔ lb, g ↔ oz), distance (km ↔ mi, m ↔ yd, cm ↔ in), volume (ml ↔ fl oz, l ↔ qt), pace (min/km ↔ min/mi). One switch sets all dimensions at once; each can then be changed individually (e.g. Imperial speed with Metric weight). Units such as grams vs kilograms, stone or m/s are chosen per parameter (FR-TRK-09). | M | Switching weight to Imperial changes every form, chart, personal record and export from kg to lb immediately; no stored value changes. |
 
 ### 2.3 Subscription & Billing (SUB)
 
@@ -151,6 +153,8 @@ Priority uses **MoSCoW** (M = Must, S = Should, C = Could). Each requirement has
 | FR-TRK-06 | Each change increments the tracker's **schema version**; concurrent edits from two devices are detected (optimistic concurrency, `If-Match`). | M | Stale update returns `412`. |
 | FR-TRK-07 | Users can archive / restore / delete a tracker. | M | Archive keeps data; delete requires confirmation. |
 | FR-TRK-08 | When a new template version is published, users may **upgrade** their tracker (diff shown, overrides preserved). | S | Upgrade is opt-in. |
+| FR-TRK-09 | Users can change the **unit of any measured parameter or metric** in a tracker to any unit of the same dimension (e.g. bowling speed in mph or m/s; dumbbell weight in lb or kg; bat weight in g; body weight in st), or set one unit for a whole dimension in the tracker ("all weights in lb"). A per-parameter choice overrides the profile preference (FR-PRF-06). | M | Takes effect immediately, **including in a session already in progress** (it does not bump the schema version). Ranges and steps are shown in the chosen unit (40–170 km/h ⇒ 24.9–105.6 mph). |
+| FR-TRK-10 | A **custom parameter** declares its dimension and unit from the supported unit list, so it is convertible like catalog parameters. Units without a dimension (reps, bpm, rpm, %, free text such as "shuttles") are labels only. | M | A custom `bat_weight` (mass, g) can be shown in oz. |
 
 ### 2.6 Daily Recording (REC)
 
@@ -171,6 +175,10 @@ Priority uses **MoSCoW** (M = Must, S = Should, C = Could). Each requirement has
 | FR-REC-13 | **Auto-close**: sessions left `IN_PROGRESS` with no activity for 3 h (configurable), or after local midnight + 2 h, are completed automatically and flagged. | M | Forgotten sessions still appear in charts the next morning. |
 | FR-REC-14 | **Live in-session stats** (e.g. balls bowled, yorker accuracy so far, average speed) computed on the device from the same metric definitions. | S | Updates instantly after each ball, also offline. |
 | FR-REC-15 | A session in progress can be **resumed on another device** (pull the synced entries). | C | Resume shows entries up to the last checkpoint. |
+| FR-REC-17 | Every session has a **name**. The pair **(session date, session name) is unique per user**, so a user can identify any session as e.g. *3 Oct 2026 · Evening Gym*. Name matching ignores case and extra spaces. | M | Starting a second "Morning Nets" on the same date is rejected online (with a suggested free name) and auto-renamed to "Morning Nets (2)" when it arrives through offline sync; the same name is allowed on a different date. |
+| FR-REC-18 | **Any number of sessions per day** (N): morning and evening sessions, batting then bowling, bowling then gym. Sessions may be on the same or different trackers, and more than one may be `IN_PROGRESS` at the same time. | M | A user can record 5 sessions on one date; each appears separately in the day's list, and the day's charts include all of them. |
+| FR-REC-19 | **Default name** when the user does not type one: `<tracker name> – <part of day>` from the local start time (Morning 05–12, Afternoon 12–17, Evening 17–21, Night 21–05), plus a number if needed. Users can rename a session at any time. | M | First bowling session at 06:10 ⇒ "My Bowling – Morning"; a second one at 09:00 ⇒ "My Bowling – Morning 2". |
+| FR-REC-20 | The **session date** is the local date at Start (user timezone), editable for backfill. Changing the date or name re-checks uniqueness. A session that runs past midnight keeps its start date. | M | A session started 23:30 on 3 Oct and ended 00:40 belongs to 3 Oct. |
 | FR-REC-16 | **History search** within a user's own data: sessions by tracker/date, notes and tags text, sessions by metric threshold or rank (e.g. yorker accuracy ≥ 70 %, top 10 fastest), and entries by parameter filters (e.g. balls ≥ 140 km/h, sets ≥ 100 kg) within the last 12 months; older entry-level searches run as async exports. | M | See `08_Search_and_Query_Performance.md` §3. |
 
 ### 2.7 Analytics & Charts (ANL)
@@ -186,6 +194,8 @@ Priority uses **MoSCoW** (M = Must, S = Should, C = Could). Each requirement has
 | FR-ANL-07 | Share/download chart as image. | C | — |
 | FR-ANL-08 | **Ratio charts** show the value and its components (e.g. 66.7 % = 12 / 18) per day/week/month, with the denominator visible so small samples are obvious. | M | Tooltip shows `12 of 18 yorkers accurate`. |
 | FR-ANL-09 | Session detail view: entry-by-entry table (ball-by-ball) and per-group summaries (per over). | S | Over 3: 6 balls, avg 133 km/h, 2/3 yorkers. |
+| FR-ANL-10 | Charts, summaries, personal records and exports use the **user's chosen unit** (FR-PRF-06, FR-TRK-09). Changing the unit re-labels history without recalculation drift. | M | Top speed 142.0 km/h shows as 88.2 mph; switching back shows 142.0 km/h. |
+| FR-ANL-11 | **Per-session view within a day**: the day's chart point can be expanded into its named sessions (e.g. Morning Nets 74 % vs Evening Nets 61 % yorker accuracy). | S | Day value = Σ of all that day's sessions; each session also listed with its own value. |
 
 ### 2.8 Notifications (NTF)
 
@@ -361,6 +371,8 @@ Targets apply to **Beta on AWS** unless stated otherwise. The test environment (
 | Phase 1 knowledge of sports roles & gym muscle groups (v1.2) | FR-CAT-12..14 | `07_Phase1_Activity_Catalog.md`, `catalog/phase1/catalog.json`, diagram `13` |
 | Fast search at 10K users; < 5 s prod / < 2 s test (v1.2) | FR-REC-16, NFR-PERF-09..11 | `08_Search_and_Query_Performance.md`, diagram `14` |
 | Charts daily/weekly/monthly | FR-ANL-01..06, NFR-PERF-03 | analytics-svc rollups + Redis, sequence `07` |
+| Sessions identified by date + unique name; N sessions per day (v1.3) | FR-REC-17..20, FR-ANL-11 | `activity_session.name` + unique index, ADR-015, LLD §4.5 |
+| Units editable: km/h ↔ mph, kg ↔ lb ↔ g … (v1.3) | FR-PRF-06, FR-TRK-09..10, FR-ANL-10 | unit registry, canonical storage, `libs/units`, ADR-014, LLD §3.1 |
 | TR-1 Microservices, independent scaling | NFR-SCAL-02 | 7 services, DB-per-service, HPA/KEDA |
 | TR-2 Flexible DB design | NFR-MNT-01 | PostgreSQL + JSONB + typed EAV values (ADR-002) |
 | TR-3 AuthN/AuthZ, subscriptions | FR-IAM-*, FR-SUB-* | Keycloak OIDC, plan claim, entitlement checks |

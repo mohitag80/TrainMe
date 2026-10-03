@@ -2,7 +2,7 @@
 
 | Item | Value |
 |---|---|
-| Version | 1.2 · 2026-10-03 (reusable activity library + parameter sets, JSONB entry values, search structures, catalog seeding; v1.1 live sessions, conditions, ratio metrics) |
+| Version | 1.3 · 2026-10-03 (named sessions, N per day; unit registry and editable units; 1.2 reusable activity library + parameter sets, JSONB entry values, search structures, catalog seeding; v1.1 live sessions, conditions, ratio metrics) |
 | Related | `02_High_Level_Design.md` |
 | Diagrams | `03_data_model_erd`, `04_activity_taxonomy_schema`, `05`–`08` sequences |
 
@@ -100,6 +100,24 @@ CREATE TABLE activity_definition (
   UNIQUE (code, version)
 );
 
+-- v1.3: unit registry (ADR-014). Seeded from catalog.json "lookups.units"; factors are exact definitions.
+CREATE TABLE unit_dimension (
+  code       VARCHAR(16) PRIMARY KEY,              -- speed | mass | length | duration | energy | volume | pace
+  name       VARCHAR(40) NOT NULL,
+  base_unit  VARCHAR(16) NOT NULL                  -- reference unit for factors: m/s, kg, m, s, kcal, l, s/m
+);
+CREATE TABLE unit (
+  code         VARCHAR(16) PRIMARY KEY,            -- 'km/h', 'mph', 'kg', 'lb', 'g', 'mi', 'reps', 'bpm' …
+  dimension    VARCHAR(16) REFERENCES unit_dimension(code),   -- NULL = label-only unit (reps, bpm, rpm, %, AU): never converted
+  label        VARCHAR(40) NOT NULL,               -- "miles per hour"
+  to_base      NUMERIC(30,15),                     -- value_in_base = value × to_base   (lb 0.45359237, mi 1609.344, km/h 1/3.6)
+  system       VARCHAR(8) NOT NULL DEFAULT 'BOTH' CHECK (system IN ('METRIC','IMPERIAL','BOTH')),
+  counterpart  VARCHAR(16) REFERENCES unit(code),  -- same-magnitude unit in the other system: kg↔lb, g↔oz, km↔mi, cm↔in, km/h↔mph
+  decimals     SMALLINT NOT NULL DEFAULT 1,        -- display rounding
+  step         NUMERIC,                            -- input stepper step in this unit (lb 0.5, kg 0.25, g 1)
+  CHECK ((dimension IS NULL) = (to_base IS NULL))
+);
+
 CREATE TABLE parameter_set (                       -- reusable shapes: strength_set, cardio_bout, drill_block …
   id           UUID PRIMARY KEY,
   code         VARCHAR(64) NOT NULL UNIQUE,
@@ -129,7 +147,9 @@ CREATE TABLE parameter_definition (                -- owned by an activity OR by
   key          VARCHAR(64) NOT NULL CHECK (key ~ '^[a-z][a-z0-9_]{1,63}$'),
   label        VARCHAR(120) NOT NULL,
   data_type    VARCHAR(16) NOT NULL CHECK (data_type IN ('INT','DECIMAL','BOOL','ENUM','TEXT','DURATION')),
-  unit         VARCHAR(16),                       -- kg, km/h, reps, kcal, s
+  unit         VARCHAR(16) REFERENCES unit(code), -- CANONICAL (storage) unit, fixed once published: kg, km/h, reps, kcal, s
+  dimension    VARCHAR(16) REFERENCES unit_dimension(code),  -- derived from unit; NULL = not convertible
+  allowed_units TEXT[],                           -- optional narrowing of the picker (body weight: kg, lb, st); NULL = every unit of the dimension
   constraints  JSONB NOT NULL DEFAULT '{}',       -- {"min":40,"max":170,"step":0.1,"options":["off","leg"],"max_ref":"attempts"}
   condition    JSONB,                             -- {"when":{"key":"yorker_attempted","eq":true}}  (shown/required only then)
   default_agg  VARCHAR(16) NOT NULL DEFAULT 'AVG'
@@ -149,7 +169,8 @@ CREATE TABLE metric_definition (                   -- chartable metrics, incl. r
   kind         VARCHAR(8) NOT NULL CHECK (kind IN ('RATIO','SINGLE')),
   numerator    JSONB NOT NULL,                    -- term or [terms]: {"fn":"COUNT_TRUE","param":"yorker_accurate"}
   denominator  JSONB,                             -- {"fn":"COUNT_TRUE","param":"yorker_attempted"}  (NULL for SINGLE)
-  display      JSONB NOT NULL DEFAULT '{}',       -- {"format":"PERCENT","decimals":1} | {"format":"NUMBER","unit":"km/h","scale":6}
+  display      JSONB NOT NULL DEFAULT '{}',       -- {"format":"PERCENT","decimals":1} | {"format":"NUMBER","rawUnit":"m","unit":"km","decimals":2}
+                                                  -- rawUnit = canonical unit the formula yields; unit = default display unit (converted via the registry)
   sort_order   INT NOT NULL DEFAULT 0,
   CHECK (num_nonnulls(activity_id, parameter_set_id) = 1),
   UNIQUE NULLS NOT DISTINCT (activity_id, parameter_set_id, key)
@@ -195,6 +216,7 @@ CREATE TABLE user_tracker (
   base_snapshot        JSONB NOT NULL,           -- copy of template (activities, parameters, metrics) at subscribe time
   effective_schema     JSONB NOT NULL,           -- compiled: template ⊕ overrides
   schema_version       INT NOT NULL DEFAULT 1,
+  display_units        JSONB NOT NULL DEFAULT '{}',  -- v1.3: {"delivery.speed_kmph":"mph", "*.mass":"lb"}; NOT part of schema_version (ADR-014)
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -222,7 +244,9 @@ CREATE TABLE activity_session (
   id                 UUID NOT NULL,
   user_id            UUID NOT NULL,
   tracker_id         UUID NOT NULL,
-  session_date       DATE NOT NULL,             -- local date (user timezone) of started_at
+  session_date       DATE NOT NULL,             -- local date (user timezone) of started_at; editable for backfill
+  name               VARCHAR(80) NOT NULL CHECK (length(btrim(name)) BETWEEN 1 AND 80),   -- v1.3: "Morning Nets", "Evening Gym"
+  name_key           VARCHAR(80) GENERATED ALWAYS AS (lower(regexp_replace(btrim(name), '\s+', ' ', 'g'))) STORED,
   status             VARCHAR(12) NOT NULL DEFAULT 'IN_PROGRESS'
                      CHECK (status IN ('IN_PROGRESS','COMPLETED','DISCARDED')),
   started_at         TIMESTAMPTZ NOT NULL,
@@ -243,6 +267,9 @@ CREATE TABLE activity_session (
   PRIMARY KEY (id, session_date)
 ) PARTITION BY RANGE (session_date);
 CREATE UNIQUE INDEX ON activity_session (user_id, client_session_id, session_date);
+-- v1.3 (ADR-015): (date, name) identifies a session for its user; discarded / deleted sessions free the name
+CREATE UNIQUE INDEX uq_session_name ON activity_session (user_id, session_date, name_key)
+  WHERE deleted_at IS NULL AND status <> 'DISCARDED';
 CREATE INDEX ON activity_session (user_id, tracker_id, session_date DESC);
 CREATE INDEX ON activity_session (status, last_synced_at) WHERE status = 'IN_PROGRESS';   -- auto-close scan
 
@@ -269,6 +296,8 @@ CREATE INDEX ON activity_entry (session_id, seq_no);
 ```
 
 Notes:
+- **Sessions per day (v1.3):** no product limit; any number of sessions per user per date, on the same or different trackers, and several may be `IN_PROGRESS` at once. A configurable guard (`records.maxSessionsPerDay`, default 50) returns `429` above it. `uq_session_name` was tested on a partitioned table: "Morning Nets" and "  morning   NETS " clash on the same date, the same name on another date is accepted, and discarding a session frees its name.
+- **Values are stored in the parameter's canonical unit** (e.g. `speed_kmph` always km/h even if the user typed mph). See §3.1.
 - Parameters whose condition is false are **not stored**: the key is absent from `values`. A missing key means "not applicable", which differs from `false`.
 - Volume (10K users × 3 sessions/day × 50 entries): ~1.5 M entry rows/day, ~548 M/year (~245 GB with indexes). The v1.1 row-per-value design would have produced ~6 B rows/year. Sizing, indexes and query shapes are in `08_Search_and_Query_Performance.md`.
 
@@ -303,6 +332,7 @@ CREATE TABLE personal_record (
 );
 CREATE TABLE session_metric (                      -- per-session metric values for history search (08 §4.3)
   user_id UUID NOT NULL, tracker_id UUID NOT NULL, session_id UUID NOT NULL, session_date DATE NOT NULL,
+  session_name VARCHAR(80) NOT NULL, started_at TIMESTAMPTZ NOT NULL,     -- v1.3: per-session view inside a day (FR-ANL-11)
   activity_code VARCHAR(80) NOT NULL, metric_key VARCHAR(64) NOT NULL, num NUMERIC, den NUMERIC, value NUMERIC,
   PRIMARY KEY (user_id, session_id, activity_code, metric_key)
 );
@@ -387,6 +417,7 @@ If a second session on 5 Oct has seam 20/24, the WEEK row becomes `num 43, den 5
 ### 2.5 profile_db, billing_db, notification_db
 These follow the ERD diagram (`user_profile`, `user_device`, `plan`, `subscription`, `payment_event`, `reminder`, `notification_log`).
 - `payment_event.provider_event_id` is **UNIQUE** (webhook idempotency).
+- `user_profile.unit_preferences JSONB` (v1.3, FR-PRF-06): `{"preset":"METRIC","speed":"IMPERIAL","mass":"METRIC","length":"METRIC","volume":"METRIC","pace":"METRIC"}`. The preset fills every dimension; each can then be switched. Published in `user.updated` so analytics and notification-svc can format values ("New PR: 88.2 mph").
 - `plan.entitlements` example: `{"max_trackers": 3, "custom_params": true, "history_days": 365, "export": true, "reminders": 10}`.
 
 ### 2.6 outbox_event (every DB)
@@ -422,7 +453,7 @@ Input: `base_snapshot` (template version) + ordered `tracker_override` rows. Out
     "code": "delivery", "name": "Delivery", "recordingMode": "PER_ATTEMPT",
     "grouping": {"label": "Over", "size": 6}, "maxEntries": 500,
     "parameters": [
-      {"key": "speed_kmph", "type": "DECIMAL", "unit": "km/h", "displayUnit": "mph", "min": 40, "max": 170, "step": 0.1},
+      {"key": "speed_kmph", "type": "DECIMAL", "dimension": "speed", "unit": "km/h", "min": 40, "max": 170, "step": 0.1},
       {"key": "line", "type": "ENUM", "options": ["off", "middle", "leg", "wide"]},
       {"key": "yorker_attempted", "type": "BOOL", "required": true},
       {"key": "yorker_accurate", "type": "BOOL", "required": true, "when": {"key": "yorker_attempted", "eq": true}},
@@ -457,14 +488,44 @@ Input: `base_snapshot` (template version) + ordered `tracker_override` rows. Out
 ```
 
 Rules:
-1. Apply overrides in `created_at` order: **ADD** appends a parameter, metric or activity; **MODIFY** may change `label, unit(display), min/max, options (add only), agg, required, condition, sort_order` or a metric's display; **HIDE** sets `hidden=true` (kept for history rendering, excluded from forms and new metrics).
+1. Apply overrides in `created_at` order: **ADD** appends a parameter, metric or activity; **MODIFY** may change `label, min/max, options (add only), agg, required, condition, sort_order` or a metric's display format (the **display unit is not an override**: it lives in `display_units`, §3.1); **HIDE** sets `hidden=true` (kept for history rendering, excluded from forms and new metrics).
 2. A **type change is not allowed** through MODIFY. The client must ADD a new key, and the old key can be HIDDEN.
 3. Conditions: they may reference only a BOOL or ENUM parameter of the **same activity**, with no cycles and a nesting depth ≤ 2. The compiler emits `if/then/else`, so the child is required when the parent matches and **forbidden** otherwise.
 4. Metrics: every `param` referenced must exist in the effective schema (a hidden param keeps old metrics valid for history). `fn` must fit the type (`COUNT_TRUE` → BOOL; `SUM` → INT/DECIMAL/DURATION).
 5. Validate: unique keys per activity; reserved keys (`id`, `seq_no`, `recorded_at`, `group_no`…) rejected; plan limits (max params per activity 30, max custom metrics 10, custom params allowed).
-6. Units: stored values are always in the canonical unit (`km/h`, `kg`, `s`). A display-unit change converts only in the client and in analytics responses.
+6. Units: a parameter's canonical `unit` and `dimension` can never be changed by MODIFY (that would reinterpret history). Stored values are always canonical; the display unit is resolved separately (§3.1).
 7. The compiled result is stored in `user_tracker.effective_schema` and cached in Redis as `schema:{trackerId}:v{n}` (no TTL; immutable per version), with `schema:{trackerId}:latest` → n (TTL 1 h). **A session pins `schema_version` at Start**, so edits made mid-session apply to the next session.
 8. The same compiler and metric evaluator ship as a shared TypeScript package (`libs/schema`). Mobile, web and the server therefore produce identical validation results and live stats.
+
+### 3.1 Units of measure (v1.3, ADR-014)
+
+**Registry** (`unit_dimension`, `unit`; seeded from `catalog.json → lookups.units`, listed in `07_Phase1_Activity_Catalog.md` §1.2):
+
+| Dimension | Base | Units (metric ↔ imperial counterpart) |
+|---|---|---|
+| speed | m/s | km/h ↔ mph, m/s ↔ ft/s |
+| mass | kg | kg ↔ lb, g ↔ oz, st (imperial) |
+| length | m | km ↔ mi, m ↔ yd, cm ↔ in, mm, ft |
+| duration | s | ms, s, min, h (same in both systems) |
+| energy | kcal | kcal, kJ |
+| volume | l | ml ↔ fl oz, l ↔ qt |
+| pace | s/m | min/km ↔ min/mi |
+| *(none)* | – | reps, bpm, rpm, spm, %, AU, and free-text custom units: labels only |
+
+**Which unit is shown** for a parameter or metric (first match wins):
+1. Tracker, this parameter: `display_units["delivery.speed_kmph"] = "mph"` (FR-TRK-09).
+2. Tracker, this dimension: `display_units["*.mass"] = "lb"` ("everything in this tracker in pounds").
+3. Profile preference for the dimension (FR-PRF-06): `IMPERIAL` → the canonical unit's `counterpart` (kg → lb, g → oz, km/h → mph, cm → in); `METRIC` → the canonical unit itself.
+4. The catalog's canonical unit.
+
+**Conversion** (`libs/units`, used by mobile, web, analytics and export):
+- `display = canonical × to_base(canonical) ÷ to_base(display)`, and the reverse on input. Only linear factors (no offsets), so sums, averages, maxima and ratios convert exactly the same way before or after aggregation.
+- Input is converted to canonical **on the device before the entry is saved**, rounded to 6 decimal places. The server only ever receives canonical values, so validation, checkpoints, rollups, PRs and search work as before. Example: the user types 100 lb → stored `45.359237` kg → shown again as `100.0 lb`.
+- Ranges are converted for display and rounded **inwards** (min up, max down), so a value inside the displayed range is always valid: 40–170 km/h → 24.9–105.6 mph. The stepper uses the display unit's `step`.
+- Metrics: a metric's `display.rawUnit` (what the formula yields, e.g. `SUM(distance_m)` → m) converts to the resolved unit (km or mi). Ratios and percentages have no unit. Pace converts min/km ↔ min/mi.
+- Changing a display unit is `PUT /trackers/{id}/display-units` or `PUT /profiles/me` and does **not** bump `schema_version`, so it is allowed in the middle of a live session.
+- CSV import (FR-REC-08) may name the unit in the header (`speed_kmph[mph]`); the importer converts to canonical.
+- History search thresholds (≥ 87 mph) are converted to canonical by the client before calling the API.
 
 ---
 
@@ -476,7 +537,7 @@ Base URL: `https://api.<env>.trainme.app/api/v1`. Auth: `Authorization: Bearer <
 | Method | Path | Description |
 |---|---|---|
 | GET | `/profiles/me` | Get own profile |
-| PUT | `/profiles/me` | Create/update profile (upsert, id = token `sub`) |
+| PUT | `/profiles/me` | Create/update profile (upsert, id = token `sub`), including `unitPreferences` (§3.1) |
 | POST | `/profiles/me/devices` | Register device + push token |
 | DELETE | `/profiles/me/devices/{deviceId}` | Unregister device |
 | POST | `/profiles/me/export` | Request data export (202 + job id) |
@@ -496,6 +557,7 @@ Base URL: `https://api.<env>.trainme.app/api/v1`. Auth: `Authorization: Bearer <
 | Method | Path | Description |
 |---|---|---|
 | GET | `/categories?parent={id}` | Browse tree |
+| GET | `/units` | Unit registry (dimensions, units, factors, counterparts); cached by clients, changes only with a catalog release |
 | GET | `/templates?category={id}&q=bowler` | Search templates |
 | GET | `/templates/{code}` | Latest published version (with activities and parameters) |
 | GET | `/templates/{code}/versions/{v}` | Specific version |
@@ -513,19 +575,21 @@ Base URL: `https://api.<env>.trainme.app/api/v1`. Auth: `Authorization: Bearer <
 | DELETE | `/trackers/{id}/overrides/{overrideId}` | Remove an override (`If-Match`) |
 | POST | `/trackers/{id}/upgrade` | Upgrade to newer template version (preview with `?dryRun=true`) |
 | PATCH | `/trackers/{id}` | Rename / archive / restore |
+| GET/PUT | `/trackers/{id}/display-units` | v1.3: per-parameter / per-dimension display units `{"delivery.speed_kmph":"mph","*.mass":"lb"}`. No `If-Match` on schema version; unit must belong to the parameter's dimension (`422` otherwise) |
 | DELETE | `/trackers/{id}` | Delete tracker (async purge of its records) |
 
 ### 4.5 Records – records-svc (live sessions)
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/sessions` | **Start** a session `{clientSessionId, trackerId, schemaVersion, startedAt, timezone}` → `201 {sessionId, status: IN_PROGRESS}`. Idempotent on `clientSessionId`. |
+| POST | `/sessions` | **Start** a session `{clientSessionId, trackerId, name, sessionDate?, schemaVersion, startedAt, timezone, onNameConflict: REJECT\|SUFFIX}` → `201 {sessionId, name, sessionDate, status: IN_PROGRESS}`. Idempotent on `clientSessionId`. Name clash: `REJECT` → `409 session-name-taken {suggestedName}`; `SUFFIX` (used by queued offline starts) → saved as `"Morning Nets (2)"` and returned. |
 | POST | `/sessions/{id}/entries:batch` | **Checkpoint**: upsert new/edited entries and tombstone deletes. Idempotent on `client_entry_id`. |
 | POST | `/sessions/{id}/complete` | **End / submit** `{endedAt, entryCount, lastBatchSeq}` → `200 COMPLETED`, or `409 {missingClientEntryIds}` |
 | POST | `/sessions/{id}/discard` | Discard an in-progress session |
-| GET | `/sessions?trackerId=&from=&to=&status=` | List sessions (summary + live metrics) |
+| GET | `/sessions?date=&trackerId=&from=&to=&status=` | List sessions (summary + live metrics). `?date=2026-10-03` returns **all of that day's sessions across trackers**, ordered by `started_at` |
+| GET | `/sessions/lookup?date=2026-10-03&name=Evening%20Gym` | Find one session by its user-facing identity (date + name, case-insensitive) |
 | GET | `/sessions/{id}?include=entries` | Full session with entries and values (used to **resume on another device**) |
-| PATCH | `/sessions/{id}` | Edit notes / times after completion (`If-Match: row_version`); entry edits after completion go through `entries:batch` with `If-Match` |
+| PATCH | `/sessions/{id}` | Rename (`name`), move (`sessionDate`), edit notes / times (`If-Match: row_version`). Allowed while `IN_PROGRESS` too. Name/date clash → `409 session-name-taken {suggestedName}`. Entry edits after completion go through `entries:batch` with `If-Match` |
 | DELETE | `/sessions/{id}` | Soft delete |
 | POST | `/sessions:import` | Backfill / bulk import of completed sessions (CSV-converted), ≤ 50 per call |
 
@@ -568,6 +632,12 @@ Server rules for `entries:batch`:
 
 `complete` verifies `entryCount` against the server's live entry count. On a mismatch it returns `409` with the missing `clientEntryId`s, the app resends them, then retries. On success it sets `COMPLETED` and `ended_at`, and writes the `record.session.completed` outbox event in the same transaction.
 
+**Session naming rules (v1.3, FR-REC-17..20):**
+- The **client proposes the name**. If the user leaves it empty, the app uses `<tracker name> – <part of day>` from the local start time (Morning 05–12, Afternoon 12–17, Evening 17–21, Night 21–05) and adds ` 2`, ` 3` … if that day already has it. The server falls back to `Session – <part of day>` when a name is missing (imports).
+- The server is the **referee**: inside the start/rename transaction it inserts and, on a `uq_session_name` violation, either returns `409` (`REJECT`) or retries with the next free ` (n)` suffix (`SUFFIX`). The suggestion in the `409` is computed the same way.
+- `session_date` is the local date at Start and does not change at midnight. A backfilled session can set it explicitly.
+- Every `record.session.*` event carries `name` and `sessionDate`; a rename emits `record.session.updated` so analytics updates `session_metric.session_name`.
+
 **Auto-close job** (records-svc, every 10 min, leader-elected or a Kubernetes CronJob): `IN_PROGRESS` sessions with `last_synced_at` older than 3 h (configurable), or older than local midnight + 2 h, become `COMPLETED` with `auto_closed = true`, and the completed event is emitted. Empty sessions become `DISCARDED`.
 
 ### 4.6 Analytics – analytics-svc
@@ -576,6 +646,7 @@ Server rules for `entries:batch`:
 | GET | `/analytics/series?trackerId=&activity=&metric=&granularity=DAY\|WEEK\|MONTH&from=&to=` | Chart series for a parameter stat (`metric=speed_kmph&agg=MAX`) or a defined metric (`metric=yorker_accuracy`) |
 | GET | `/analytics/summary?trackerId=&period=WEEK` | Dashboard KPIs vs previous period |
 | GET | `/analytics/sessions/{id}/breakdown?by=group` | Per-over / per-round summary of one session (computed from the session snapshot) |
+| GET | `/analytics/day?date=&trackerId=` | v1.3: per-session values inside one day (FR-ANL-11): `[{sessionId, name, startedAt, metrics{…}}]` from `session_metric` |
 | GET | `/analytics/records?trackerId=` | Personal records |
 | GET | `/analytics/streaks` | Streaks per tracker |
 
@@ -585,6 +656,8 @@ Server rules for `entries:batch`:
             {"period": "2026-09-21", "value": 61.9, "num": 13, "den": 21},
             {"period": "2026-09-28", "value": 66.7, "num": 12, "den": 18}]}
 ```
+
+Values are returned in the **canonical unit** with `"unit": "km/h"`; the client converts with `libs/units`. Server-rendered outputs (exports, share images, notifications) pass `?displayUnit=mph` or use the profile preference.
 
 `num` and `den` are always returned, so the UI can show "12 of 18" and fade out points with a tiny denominator (e.g. `den < 5`).
 
@@ -644,7 +717,7 @@ Example:
   "datacontenttype": "application/json",
   "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
   "data": {
-    "sessionId": "ses-1", "userId": "usr-42", "trackerId": "trk-1", "sessionDate": "2026-10-03",
+    "sessionId": "ses-1", "userId": "usr-42", "trackerId": "trk-1", "sessionDate": "2026-10-03", "name": "Morning Nets",
     "timezone": "Asia/Kolkata", "schemaVersion": 3, "status": "COMPLETED", "autoClosed": false,
     "startedAt": "2026-10-03T00:40:00Z", "endedAt": "2026-10-03T01:20:00Z", "entryCount": 50,
     "entries": [
@@ -670,8 +743,8 @@ Consumer rules: at-least-once delivery. Every consumer checks `processed_event`,
 ![Record](../diagrams/png/06_seq_record_session.png)
 
 Client algorithm (mobile and web share it via `libs/sync`):
-1. **Start**: create the local session (`client_session_id`, UUIDv7), pin the cached schema version, start the timer, and call `POST /sessions` (queued if offline; the server is idempotent on `clientSessionId`).
-2. **Log**: each ball/set/item becomes a local entry (`client_entry_id`, `seq_no`, `group_no`, `recorded_at`, values) **written to SQLite / IndexedDB before the UI confirms** (≤ 100 ms). Conditional fields are shown only when their parent matches. Live stats are recomputed from local entries with the shared metric evaluator.
+1. **Start**: ask for (or default) the session name, create the local session (`client_session_id`, UUIDv7), pin the cached schema version, start the timer, and call `POST /sessions` with `onNameConflict=REJECT` when online, or queue it with `SUFFIX` when offline (the server is idempotent on `clientSessionId`). Other sessions may already be in progress; the app shows them in an "active sessions" bar to switch between.
+2. **Log**: each ball/set/item becomes a local entry (`client_entry_id`, `seq_no`, `group_no`, `recorded_at`, values converted to canonical units) **written to SQLite / IndexedDB before the UI confirms** (≤ 100 ms). Conditional fields are shown only when their parent matches. Live stats are recomputed from local entries with the shared metric evaluator.
 3. **Checkpoint**: a timer fires every `sync.intervalSec` (remote config, default 240 s, allowed 180–300 s, ±30 s jitter). Early flushes happen on: app background / `visibilitychange=hidden` (web), network regain, ≥ 25 unsynced entries. Each flush sends all unsynced new/edited/deleted entries in batches of ≤ 100 with an incrementing `batchSeq`.
    - Mobile: foreground timer while the session screen is open, plus a flush on background (iOS `beginBackgroundTask`, Android WorkManager expedited work).
    - Web: `setInterval` + IndexedDB, flush on `visibilitychange` and `pagehide` (using `fetch(…, {keepalive: true})`), and Service Worker Background Sync where supported.

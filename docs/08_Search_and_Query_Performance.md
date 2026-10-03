@@ -2,7 +2,7 @@
 
 | Item | Value |
 |---|---|
-| Version | 1.0 · 2026-10-03 |
+| Version | 1.1 · 2026-10-03 (session names in search, day listing, unit-aware thresholds) |
 | Requirement | Search API responses **< 5 s in production** and **< 2 s on the local k3s test instance**, with **10K registered users each recording several sessions per day** (NFR-PERF-09/10) |
 | Related | SRS NFR-PERF-09..11, FR-CAT-12..14, FR-REC-16 · HLD ADR-011/012 · LLD §2 · diagram `14_search_query_paths` |
 
@@ -63,9 +63,10 @@ Search traffic is small compared with writes. If 20 % of users are online at pea
 | S2 | Autocomplete while typing: "squ…" | `GET /catalog/suggest` | `catalog_search_doc` | GIN trigram + Redis |
 | S3 | Browse by facet: sport = cricket, role = fast_bowler; muscle = chest, equipment = dumbbell | `GET /catalog/search?…facets` | `catalog_search_doc` | GIN on `sports`, `roles`, `muscles`, `equipment` arrays |
 | S4 | My sessions for a tracker and date range | `GET /sessions?trackerId&from&to` | `activity_session` | B-tree (`user_id, tracker_id, session_date DESC`) + partition pruning |
-| S5 | My sessions whose notes or tags contain "new run-up" | `GET /sessions/search?q=` | `activity_session` | GIN (`user_id`, `search_tsv`) via `btree_gin` |
+| S4b | All my sessions on a date (morning nets, evening gym …); one session by date + name | `GET /sessions?date=`, `GET /sessions/lookup?date&name` | `activity_session` | unique `uq_session_name` (`user_id, session_date, name_key`) – also serves the per-day count guard |
+| S5 | My sessions whose **name**, notes or tags contain "new run-up" | `GET /sessions/search?q=` | `activity_session` | GIN (`user_id`, `search_tsv`) via `btree_gin` |
 | S6 | Sessions where yorker accuracy ≥ 70 % in the last 6 months; my top 10 fastest sessions | `GET /analytics/sessions/search?metric&min&max&sort` | `session_metric` | B-tree (`user_id, tracker_id, metric_key, value DESC`) |
-| S7 | Every ball ≥ 140 km/h in the last 30 days; bench-press sets ≥ 100 kg this year | `GET /entries/search?activity&where` | `activity_entry` | B-tree (`user_id, activity_code, session_date DESC`) + JSONB filter on that user's rows |
+| S7 | Every ball ≥ 140 km/h (or ≥ 87 mph – the client converts thresholds to the canonical unit first, LLD §3.1) in the last 30 days; bench-press sets ≥ 100 kg this year | `GET /entries/search?activity&where` | `activity_entry` | B-tree (`user_id, activity_code, session_date DESC`) + JSONB filter on that user's rows |
 | S8 | Personal bests | `GET /analytics/records` | `personal_record` | unique (`user_id, tracker_id, activity_code, metric_key`) |
 | S9 | Support: find a user by email/name | `GET /admin/users?q=` | `profile_db.user_profile` | GIN trigram on `email`, `display_name` |
 
@@ -137,9 +138,10 @@ CREATE TABLE activity_entry (
 CREATE INDEX ae_user_activity_date ON activity_entry (user_id, activity_code, session_date DESC) WHERE deleted_at IS NULL;
 CREATE INDEX ae_session            ON activity_entry (session_id, seq_no);
 
--- activity_session: searchable notes and tags
+-- activity_session: searchable name (v1.3), notes and tags
 ALTER TABLE activity_session ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE activity_session ADD COLUMN search_tsv tsvector GENERATED ALWAYS AS (
+  setweight(to_tsvector('simple', f_unaccent(name)), 'A') ||
   to_tsvector('simple', f_unaccent(coalesce(notes, '') || ' ' || array_to_string(tags, ' ')))) STORED;
 CREATE INDEX as_user_search ON activity_session USING GIN (user_id, search_tsv);         -- btree_gin: user first
 CREATE INDEX as_user_tracker_date ON activity_session (user_id, tracker_id, session_date DESC) WHERE deleted_at IS NULL;

@@ -25,7 +25,10 @@ def P(key, type_, label=None, unit=None, min=None, max=None, step=None, options=
       req=False, when=None, desc=None, max_ref=None):
     """Parameter definition. when=(key, value) makes it conditional (shown/required only then)."""
     d = OrderedDict(key=key, label=label or key.replace("_", " ").capitalize(), type=type_)
-    if unit: d["unit"] = unit
+    if unit:
+        d["unit"] = unit                      # canonical (storage) unit
+        if unit in UNITS and UNITS[unit]["dimension"]:
+            d["dimension"] = UNITS[unit]["dimension"]
     c = OrderedDict()
     if min is not None: c["min"] = min
     if max is not None: c["max"] = max
@@ -49,11 +52,16 @@ def T(fn, param="*", where=None, expr=None):
     return t
 
 
-def M(key, label, num, den=None, fmt="NUMBER", unit=None, decimals=1, scale=None):
+def M(key, label, num, den=None, fmt="NUMBER", unit=None, decimals=1, scale=None, raw=None):
+    """unit = default display unit; raw = unit the formula yields (defaults to unit). Convertible units get a dimension."""
     d = OrderedDict(key=key, label=label, kind="RATIO" if den is not None else "SINGLE", numerator=num)
     if den is not None: d["denominator"] = den
     disp = OrderedDict(format=fmt, decimals=decimals)
-    if unit: disp["unit"] = unit
+    if unit:
+        disp["unit"] = unit
+        if unit in UNITS and UNITS[unit]["dimension"]:
+            disp["rawUnit"] = raw or unit
+            disp["dimension"] = UNITS[unit]["dimension"]
     if scale: disp["scale"] = scale
     d["display"] = disp
     return d
@@ -94,6 +102,56 @@ MUSCLES = OrderedDict([
 ])
 
 LEVELS = ["beginner", "intermediate", "advanced"]
+
+# ---------------------------------------------------------------------------
+# Unit registry (ADR-014). Values are stored in a parameter's canonical unit and
+# converted for display: display = value * to_base(canonical) / to_base(display).
+# Factors are exact definitions (1 lb = 0.45359237 kg, 1 mi = 1609.344 m, 1 kcal = 4.184 kJ).
+# ---------------------------------------------------------------------------
+DIMENSIONS = OrderedDict([
+    ("speed", ("Speed", "m/s")), ("mass", ("Mass / weight", "kg")), ("length", ("Length / distance", "m")),
+    ("duration", ("Duration", "s")), ("energy", ("Energy", "kcal")), ("volume", ("Volume", "l")), ("pace", ("Pace", "s/m")),
+])
+
+def U(code, label, dimension=None, to_base=None, system="BOTH", counterpart=None, decimals=1, step=None):
+    return code, OrderedDict(code=code, label=label, dimension=dimension, toBase=to_base, system=system,
+                             counterpart=counterpart, decimals=decimals, step=step)
+
+UNITS = OrderedDict([
+    U("km/h", "kilometres per hour", "speed", 1 / 3.6, "METRIC", "mph", 1, 0.1),
+    U("mph", "miles per hour", "speed", 0.44704, "IMPERIAL", "km/h", 1, 0.1),
+    U("m/s", "metres per second", "speed", 1, "METRIC", "ft/s", 2, 0.1),
+    U("ft/s", "feet per second", "speed", 0.3048, "IMPERIAL", "m/s", 1, 0.1),
+    U("kg", "kilograms", "mass", 1, "METRIC", "lb", 2, 0.25),
+    U("g", "grams", "mass", 0.001, "METRIC", "oz", 0, 1),
+    U("lb", "pounds", "mass", 0.45359237, "IMPERIAL", "kg", 1, 0.5),
+    U("oz", "ounces", "mass", 0.028349523125, "IMPERIAL", "g", 1, 0.5),
+    U("st", "stone", "mass", 6.35029318, "IMPERIAL", "kg", 2, 0.1),
+    U("km", "kilometres", "length", 1000, "METRIC", "mi", 2, 0.01),
+    U("m", "metres", "length", 1, "METRIC", "yd", 1, 0.1),
+    U("cm", "centimetres", "length", 0.01, "METRIC", "in", 1, 0.5),
+    U("mm", "millimetres", "length", 0.001, "METRIC", "in", 0, 1),
+    U("mi", "miles", "length", 1609.344, "IMPERIAL", "km", 2, 0.01),
+    U("yd", "yards", "length", 0.9144, "IMPERIAL", "m", 1, 0.1),
+    U("ft", "feet", "length", 0.3048, "IMPERIAL", "m", 1, 0.1),
+    U("in", "inches", "length", 0.0254, "IMPERIAL", "cm", 1, 0.25),
+    U("ms", "milliseconds", "duration", 0.001, "BOTH", None, 0, 1),
+    U("s", "seconds", "duration", 1, "BOTH", None, 2, 0.01),
+    U("min", "minutes", "duration", 60, "BOTH", None, 1, 1),
+    U("h", "hours", "duration", 3600, "BOTH", None, 2, 0.25),
+    U("kcal", "kilocalories", "energy", 1, "BOTH", None, 0, 1),
+    U("kJ", "kilojoules", "energy", 1 / 4.184, "METRIC", None, 0, 1),
+    U("ml", "millilitres", "volume", 0.001, "METRIC", "fl oz", 0, 1),
+    U("l", "litres", "volume", 1, "METRIC", "qt", 2, 0.05),
+    U("fl oz", "US fluid ounces", "volume", 0.0295735295625, "IMPERIAL", "ml", 1, 0.5),
+    U("qt", "US quarts", "volume", 0.946352946, "IMPERIAL", "l", 2, 0.05),
+    U("s/m", "seconds per metre (raw pace)", "pace", 1, "BOTH", None, 3, None),
+    U("min/km", "minutes per kilometre", "pace", 0.06, "METRIC", "min/mi", 2, None),
+    U("min/mi", "minutes per mile", "pace", 60 / 1609.344, "IMPERIAL", "min/km", 2, None),
+    # label-only units: never converted
+    U("reps", "repetitions"), U("bpm", "beats per minute"), U("rpm", "revolutions per minute"),
+    U("spm", "steps per minute"), U("%", "percent"), U("AU", "arbitrary units"),
+])
 
 # ---------------------------------------------------------------------------
 # Reusable parameter sets (shared by many activities -> no duplication)
@@ -151,8 +209,8 @@ PSETS["cardio_bout"] = dict(name="Cardio bout / interval", desc="Steady-state pi
             P("is_work_interval", "BOOL", "Work interval (vs recovery)"),
             P("rpe", "INT", "RPE (1–10)", None, 1, 10, agg="AVG")],
     metrics=[M("total_duration_s", "Total time", T("SUM", "duration_s"), fmt="DURATION"),
-             M("total_distance_km", "Total distance", T("SUM", "distance_m"), unit="km", scale=0.001, decimals=2),
-             M("avg_pace_s_per_km", "Average pace", T("SUM", "duration_s"), T("SUM", "distance_m"), fmt="PACE", unit="min/km", scale=1000),
+             M("total_distance_km", "Total distance", T("SUM", "distance_m"), unit="km", raw="m", decimals=2),
+             M("avg_pace_s_per_km", "Average pace", T("SUM", "duration_s"), T("SUM", "distance_m"), fmt="PACE", unit="min/km", raw="s/m"),
              M("time_weighted_hr", "Average HR (time-weighted)", T("SUM", expr="avg_hr * duration_s"), T("SUM", "duration_s", where={"avg_hr": {"gte": 1}}), unit="bpm", decimals=0),
              M("calories", "Calories", T("SUM", "calories"), unit="kcal", decimals=0)])
 
@@ -642,7 +700,7 @@ A("athletics.lap", "Run Lap / Split", "EXERCISE", "PER_ATTEMPT", ["athletics.run
   roles=["distance_runner", "sprinter"], equipment=["stopwatch"], synonyms=["splits", "km split", "400 m lap", "intervals"],
   params=[P("distance_m", "DECIMAL", "Lap distance", "m", 50, 10000, req=True, agg="SUM"), P("time_s", "DECIMAL", "Lap time", "s", 5, 7200, 0.01, req=True, agg="SUM"),
           P("is_work", "BOOL", "Work rep (vs recovery)"), P("avg_hr", "INT", "Avg HR", "bpm", 40, 220, agg="AVG")],
-  metrics=[M("avg_pace", "Average pace (work laps)", T("SUM", "time_s", where={"is_work": True}), T("SUM", "distance_m", where={"is_work": True}), fmt="PACE", unit="min/km", scale=1000),
+  metrics=[M("avg_pace", "Average pace (work laps)", T("SUM", "time_s", where={"is_work": True}), T("SUM", "distance_m", where={"is_work": True}), fmt="PACE", unit="min/km", raw="s/m"),
            M("fastest_lap_s", "Fastest lap", T("MIN", "time_s"), unit="s", decimals=2)])
 
 A("athletics.time_trial", "Time Trial (1.6 km / 2 km / 5 km)", "TEST", "PER_SESSION", ["athletics.running", "conditioning", "cricket.fitness"],
@@ -919,6 +977,12 @@ def expr_params(expr):
 
 def validate():
     errs = []
+    for code, u in UNITS.items():
+        if u["dimension"] and u["dimension"] not in DIMENSIONS: errs.append(f"unit {code}: unknown dimension")
+        if u["counterpart"] and (u["counterpart"] not in UNITS or UNITS[u["counterpart"]]["dimension"] != u["dimension"]):
+            errs.append(f"unit {code}: counterpart {u['counterpart']} must be a unit of the same dimension")
+    for dim, (_, base) in DIMENSIONS.items():
+        if UNITS.get(base, {}).get("toBase") != 1: errs.append(f"dimension {dim}: base unit {base} must have toBase 1")
     for code, c in CATS.items():
         if c["parent"] and c["parent"] not in CATS: errs.append(f"category {code}: unknown parent {c['parent']}")
     for code, a in ACTS.items():
@@ -935,6 +999,8 @@ def validate():
         for m in a["primaryMuscles"] + a["secondaryMuscles"]:
             if m not in MUSCLES: errs.append(f"{code}: unknown muscle {m}")
         for p in params.values():
+            if p.get("unit") and p["unit"] not in UNITS: errs.append(f"{code}.{p['key']}: unknown unit {p['unit']}")
+            if p.get("dimension") and p["type"] not in NUMERIC: errs.append(f"{code}.{p['key']}: unit with a dimension needs a numeric type")
             cond = p.get("condition")
             if cond:
                 k, v = cond["when"]["key"], cond["when"]["eq"]
@@ -948,6 +1014,18 @@ def validate():
         mets = effective_metrics(a)
         if not mets: errs.append(f"{code}: no metrics")
         for m in mets.values():
+            d = m["display"]
+            if d.get("unit") and d["unit"] not in UNITS: errs.append(f"{code}.{m['key']}: unknown display unit {d['unit']}")
+            if d.get("rawUnit"):
+                if d["rawUnit"] not in UNITS: errs.append(f"{code}.{m['key']}: unknown raw unit {d['rawUnit']}")
+                elif UNITS[d["rawUnit"]]["dimension"] != UNITS[d["unit"]]["dimension"]: errs.append(f"{code}.{m['key']}: raw unit {d['rawUnit']} and unit {d['unit']} differ in dimension")
+                if d.get("scale"): errs.append(f"{code}.{m['key']}: use rawUnit/unit conversion instead of scale")
+                # SUM/MAX/MIN(param) and SUM(p)/COUNT(p) yield the param's own unit: check it matches rawUnit
+                n, dn = m["numerator"], m.get("denominator")
+                if isinstance(n, dict) and "param" in n and n["param"] in params and n["fn"] in ("SUM", "MAX", "MIN") \
+                        and (dn is None or (isinstance(dn, dict) and dn["fn"] == "COUNT")):
+                    pu = params[n["param"]].get("unit")
+                    if pu and pu != d["rawUnit"]: errs.append(f"{code}.{m['key']}: rawUnit {d['rawUnit']} but {n['param']} is stored in {pu}")
             terms = []
             for side in ("numerator", "denominator"):
                 t = m.get(side)
@@ -1006,7 +1084,9 @@ def to_json():
         version=VERSION,
         generatedBy="catalog/tools/build_phase1_catalog.py",
         sources=[{"title": t, "url": u} for t, u in SOURCES],
-        lookups=OrderedDict(equipment=EQUIPMENT, muscles=[{"code": k, "name": v} for k, v in MUSCLES.items()], levels=LEVELS),
+        lookups=OrderedDict(equipment=EQUIPMENT, muscles=[{"code": k, "name": v} for k, v in MUSCLES.items()], levels=LEVELS,
+                            units=OrderedDict(dimensions=[{"code": k, "name": n, "baseUnit": b} for k, (n, b) in DIMENSIONS.items()],
+                                              units=list(UNITS.values()))),
         categories=list(CATS.values()),
         parameterSets=[OrderedDict(code=k, name=v["name"], description=v["desc"], params=v["params"], metrics=v["metrics"]) for k, v in PSETS.items()],
         activities=list(ACTS.values()),
@@ -1045,7 +1125,8 @@ def fmt_term(t):
 def fmt_metric(m):
     f = fmt_term(m["numerator"]) + (" ÷ " + fmt_term(m["denominator"]) if "denominator" in m else "")
     d = m["display"]
-    disp = d["format"].lower() + (f" {d['unit']}" if d.get("unit") else "") + (f" ×{d['scale']}" if d.get("scale") else "")
+    unit = (f" {d['rawUnit']} → {d['unit']}" if d.get("rawUnit") and d["rawUnit"] != d["unit"] else f" {d['unit']}") if d.get("unit") else ""
+    disp = d["format"].lower() + unit + (f" ×{d['scale']}" if d.get("scale") else "")
     return f"| `{m['key']}` | {m['label']} | {m['kind']} | {f} | {disp} |"
 
 
@@ -1070,7 +1151,15 @@ def to_md():
     w("- **Metrics are data**. Ratios are Σ numerator ÷ Σ denominator, which stays correct for any week or month. `where` filters (e.g. first serves only) and `MAX`/`MIN` (top speed, best time) are supported.")
     w("- **Search facets** come from the same data: sport, role, category, kind (EXERCISE / DRILL / TEST / MATCH / LOG), equipment, primary/secondary muscles, mechanic, force, level and synonyms.\n")
     w("### 1.1 Metric grammar (extension of LLD §2.1)\n")
-    w("```\nterm      := {fn: COUNT | COUNT_TRUE | SUM | MAX | MIN, param: <key> | \"*\" | expr: \"<arithmetic over params>\", where?: {<key>: <value> | {in|ne|gte|lte: …}}}\nnumerator := term | [term, term, …]          -- a list is summed (e.g. full_toss + long_hop)\nRATIO     := Σ numerator ÷ Σ denominator      -- additive → exact for day / week / month\nSINGLE    := Σ numerator  (or MAX/MIN, merged with GREATEST/LEAST across periods)\ndisplay   := {format: NUMBER | PERCENT | DURATION | PACE, unit?, decimals, scale?}\n```\n")
+    w("```\nterm      := {fn: COUNT | COUNT_TRUE | SUM | MAX | MIN, param: <key> | \"*\" | expr: \"<arithmetic over params>\", where?: {<key>: <value> | {in|ne|gte|lte: …}}}\nnumerator := term | [term, term, …]          -- a list is summed (e.g. full_toss + long_hop)\nRATIO     := Σ numerator ÷ Σ denominator      -- additive → exact for day / week / month\nSINGLE    := Σ numerator  (or MAX/MIN, merged with GREATEST/LEAST across periods)\ndisplay   := {format: NUMBER | PERCENT | DURATION | PACE, unit?, rawUnit?, dimension?, decimals, scale?}\n```\n")
+    w("### 1.2 Units of measure (ADR-014)\n")
+    w("Every measured parameter stores its values in one **canonical unit** (the *Type* column below, e.g. `speed_kmph` in km/h, `weight_kg` in kg). Users see and type values in the unit they choose: per dimension in their profile (Metric ↔ Imperial uses the *counterpart*), or per parameter in a tracker (any unit of the same dimension). Metrics carry `rawUnit` (what the formula yields) and a default display `unit`; ratios and percentages have none. Parameter keys keep their canonical-unit suffix because it names the stored unit, not the shown one.\n")
+    w("Conversion: `display = value × toBase(canonical) ÷ toBase(display)` – linear only, so sums, averages, maxima and ratios convert identically before or after aggregation.\n")
+    w("| Unit | Name | Dimension | toBase | System | Counterpart | Decimals | Step |\n|---|---|---|---|---|---|---|---|")
+    for u in UNITS.values():
+        tb = "" if u["toBase"] is None else f"{u['toBase']:.12g}"
+        w(f"| `{u['code']}` | {u['label']} | {u['dimension'] or '– (label only)'} | {tb} | {u['system'] if u['dimension'] else ''} | {u['counterpart'] or ''} | {u['decimals'] if u['dimension'] else ''} | {u['step'] if u['step'] is not None else ''} |")
+    w("\nBase units: " + ", ".join(f"{k} = `{b}`" for k, (_, b) in DIMENSIONS.items()) + ".\n")
     w("---\n")
     w("## 2. Taxonomy and profile templates\n")
     w("![Phase 1 taxonomy](../diagrams/png/13_phase1_catalog_taxonomy.png)\n")

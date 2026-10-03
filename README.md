@@ -6,6 +6,8 @@ The product brief is in [`Product_requirements.txt`](Product_requirements.txt).
 
 ## Documents (`docs/`)
 
+> **v1.3 (2026-10-03):** sessions are identified by **date + unique name** per user, with any number of sessions per day (several can be in progress at once), and **units are editable** per user and per parameter (km/h ↔ mph ↔ m/s, kg ↔ lb ↔ g ↔ oz, km ↔ mi …) with values stored in canonical units. See SRS FR-PRF-06, FR-TRK-09..10, FR-REC-17..20, FR-ANL-10..11, HLD ADR-014/015, LLD §2.3, §3.1 and §4.5.
+>
 > **v1.2 (2026-10-03):** Phase 1 catalog knowledge base (147 activities, 40 templates, seed file + builder), reusable activity library and parameter sets, JSONB entry storage, and the search design for 10K users (< 5 s prod / < 2 s test).
 >
 > **v1.1 (2026-10-03):** granular live sessions (log every ball / set / item; checkpoint sync every 3–5 min; submit on End; auto-close), conditional parameters (attempted → accurate), and catalog-defined ratio metrics (Σnum ÷ Σden). See SRS FR-CAT-09..11 and FR-REC-09..15, HLD ADR-009/010, LLD §2.4.1 (worked Fast Bowler example) and §4.5.
