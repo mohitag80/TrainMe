@@ -37,6 +37,7 @@ export const EVENT_TYPES = {
   templatePublished: 'catalog.template.published',
   templateRetired: 'catalog.template.retired',
   trackerCreated: 'tracker.created',
+  trackerUpdated: 'tracker.updated',
   trackerSchemaChanged: 'tracker.schema.changed',
   trackerArchived: 'tracker.archived',
   trackerDeleted: 'tracker.deleted',

@@ -88,6 +88,11 @@ export async function bootstrapService(
   app.enableShutdownHooks();
 
   const fastify = app.getHttpAdapter().getInstance();
+  // Accept an empty body sent with Content-Type: application/json (common for action POSTs such as /discard).
+  fastify.addHook('onRequest', async (req) => {
+    const len = req.headers['content-length'];
+    if ((len === undefined || len === '0') && !req.headers['transfer-encoding']) delete req.headers['content-type'];
+  });
   fastify.addHook('onSend', async (req, reply) => {
     void reply.header('x-request-id', req.id);
   });

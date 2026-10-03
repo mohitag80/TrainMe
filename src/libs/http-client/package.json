@@ -1,0 +1,26 @@
+{
+  "name": "@trainme/http-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Service-to-service REST client: timeouts, retries with jitter, circuit breaker, client-credentials tokens",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@trainme/errors": "workspace:*",
+    "@trainme/observability": "workspace:*"
+  }
+}

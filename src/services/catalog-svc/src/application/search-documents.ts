@@ -32,10 +32,10 @@ export async function rebuildSearchDocuments(trx: Transaction<CatalogDatabase>):
     )
     INSERT INTO catalog_search_doc (item_type, item_code, name, description, sports, roles, categories, muscles, equipment)
     SELECT 'TEMPLATE', p.code, p.name, p.description,
-           COALESCE((SELECT array_agg(DISTINCT x) FROM template_activity ta JOIN activity_definition a ON a.id = ta.activity_id,
-                     unnest(a.sports) x WHERE ta.profile_template_id = p.id), '{}'),
-           COALESCE((SELECT array_agg(DISTINCT x) FROM template_activity ta JOIN activity_definition a ON a.id = ta.activity_id,
-                     unnest(a.roles) x WHERE ta.profile_template_id = p.id), '{}'),
+           -- Sport and role come from the template's own category path (Cricket › … › Fast Bowler), not from
+           -- its activities: shared conditioning drills are tagged with many sports.
+           COALESCE((SELECT array_agg(c.code::text) FROM category c WHERE c.code = ANY (t.path) AND c.kind = 'SPORT'), '{}'),
+           COALESCE((SELECT array_agg(regexp_replace(c.code, '^.*\\.', '')) FROM category c WHERE c.code = ANY (t.path) AND c.kind = 'ROLE'), '{}'),
            t.path,
            COALESCE((SELECT array_agg(DISTINCT x) FROM template_activity ta JOIN activity_definition a ON a.id = ta.activity_id,
                      unnest(a.primary_muscles) x WHERE ta.profile_template_id = p.id), '{}'),

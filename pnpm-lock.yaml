@@ -239,6 +239,15 @@ importers:
 
   src/libs/events: {}
 
+  src/libs/http-client:
+    dependencies:
+      '@trainme/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@trainme/observability':
+        specifier: workspace:*
+        version: link:../observability
+
   src/libs/kafka:
     dependencies:
       '@trainme/db':
@@ -265,6 +274,15 @@ importers:
       prom-client:
         specifier: ^15.1.3
         version: 15.1.3
+
+  src/libs/schema:
+    dependencies:
+      '@trainme/units':
+        specifier: workspace:*
+        version: link:../units
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
 
   src/libs/service-kit:
     dependencies:
@@ -351,6 +369,9 @@ importers:
       '@trainme/service-kit':
         specifier: workspace:*
         version: link:../../libs/service-kit
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
       kysely:
         specifier: ^0.29.6
         version: 0.29.6
@@ -399,9 +420,15 @@ importers:
       '@trainme/observability':
         specifier: workspace:*
         version: link:../../libs/observability
+      '@trainme/schema':
+        specifier: workspace:*
+        version: link:../../libs/schema
       '@trainme/service-kit':
         specifier: workspace:*
         version: link:../../libs/service-kit
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
       kysely:
         specifier: ^0.29.6
         version: 0.29.6
@@ -453,6 +480,9 @@ importers:
       '@trainme/service-kit':
         specifier: workspace:*
         version: link:../../libs/service-kit
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
       kysely:
         specifier: ^0.29.6
         version: 0.29.6
@@ -495,15 +525,24 @@ importers:
       '@trainme/events':
         specifier: workspace:*
         version: link:../../libs/events
+      '@trainme/http-client':
+        specifier: workspace:*
+        version: link:../../libs/http-client
       '@trainme/kafka':
         specifier: workspace:*
         version: link:../../libs/kafka
       '@trainme/observability':
         specifier: workspace:*
         version: link:../../libs/observability
+      '@trainme/schema':
+        specifier: workspace:*
+        version: link:../../libs/schema
       '@trainme/service-kit':
         specifier: workspace:*
         version: link:../../libs/service-kit
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
       kysely:
         specifier: ^0.29.6
         version: 0.29.6
@@ -555,6 +594,9 @@ importers:
       '@trainme/service-kit':
         specifier: workspace:*
         version: link:../../libs/service-kit
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
       kysely:
         specifier: ^0.29.6
         version: 0.29.6
@@ -597,15 +639,27 @@ importers:
       '@trainme/events':
         specifier: workspace:*
         version: link:../../libs/events
+      '@trainme/http-client':
+        specifier: workspace:*
+        version: link:../../libs/http-client
       '@trainme/kafka':
         specifier: workspace:*
         version: link:../../libs/kafka
       '@trainme/observability':
         specifier: workspace:*
         version: link:../../libs/observability
+      '@trainme/schema':
+        specifier: workspace:*
+        version: link:../../libs/schema
       '@trainme/service-kit':
         specifier: workspace:*
         version: link:../../libs/service-kit
+      '@trainme/units':
+        specifier: workspace:*
+        version: link:../../libs/units
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
       kysely:
         specifier: ^0.29.6
         version: 0.29.6
@@ -657,6 +711,9 @@ importers:
       '@trainme/service-kit':
         specifier: workspace:*
         version: link:../../libs/service-kit
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
       kysely:
         specifier: ^0.29.6
         version: 0.29.6

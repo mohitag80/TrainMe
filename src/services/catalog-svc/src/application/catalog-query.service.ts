@@ -68,7 +68,7 @@ const toMetric = (r: MetricRow): MetricDefinition => ({
   kind: r.kind,
   numerator: r.numerator as MetricDefinition['numerator'],
   ...(r.denominator ? { denominator: r.denominator as MetricDefinition['denominator'] } : {}),
-  display: r.display as MetricDefinition['display'],
+  display: r.display as unknown as MetricDefinition['display'],
 });
 
 @Injectable()

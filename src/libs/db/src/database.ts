@@ -26,7 +26,12 @@ export function createDatabase<DB>(opts: DatabaseOptions): Kysely<DB> {
     statement_timeout: opts.statementTimeoutMs ?? 10_000,
     application_name: opts.applicationName,
   });
-  return new Kysely<DB>({ dialect: new PostgresDialect({ pool }), plugins: [new CamelCasePlugin()] });
+  // maintainNestedObjectKeys: only column names are mapped; JSONB documents keep their keys
+  // (parameter keys such as speed_kmph inside entry values and metric `where` clauses).
+  return new Kysely<DB>({
+    dialect: new PostgresDialect({ pool }),
+    plugins: [new CamelCasePlugin({ maintainNestedObjectKeys: true })],
+  });
 }
 
 /** Readiness probe: one round trip with a short timeout. */
