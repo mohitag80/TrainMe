@@ -13,7 +13,7 @@
 Each NestJS service follows the same **hexagonal (ports & adapters)** layout, generated from a shared service template:
 
 ```
-services/<name>/
+src/services/<name>/
   src/
     api/            # REST controllers, DTOs (generated from OpenAPI), guards (JWT, roles, ownership)
     application/    # use cases / command & query handlers
@@ -28,7 +28,7 @@ services/<name>/
   openapi.yaml
 ```
 
-Shared libraries (monorepo `libs/`): `auth` (JWT validation, roles, ownership guard), `observability`, `kafka` (CloudEvents envelope, idempotent consumer), `errors` (RFC 9457), `schema` (JSON Schema compiler for trackers), `testing`.
+Shared libraries (monorepo `src/libs/`): `auth` (JWT validation, roles, ownership guard), `observability`, `kafka` (CloudEvents envelope, idempotent consumer), `errors` (RFC 9457), `schema` (JSON Schema compiler for trackers), `testing`.
 
 ---
 

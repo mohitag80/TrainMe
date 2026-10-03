@@ -1,0 +1,64 @@
+# k3s test VM (single node, ~8 GB RAM). install.sh sets image tags and the public URL:
+#   --set-string global.publicUrl=... and per-service image.tag.
+# Middleware lives in namespace trainme-platform (chart trainme-platform).
+
+x-platform-env: &platform-env
+  KAFKA_BROKERS: redpanda.trainme-platform.svc.cluster.local:9092
+  REDIS_URL: redis://valkey.trainme-platform.svc.cluster.local:6379
+  OIDC_JWKS_URL: http://keycloak.trainme-platform.svc.cluster.local:8080/auth/realms/trainme/protocol/openid-connect/certs
+  OIDC_TOKEN_URL: http://keycloak.trainme-platform.svc.cluster.local:8080/auth/realms/trainme/protocol/openid-connect/token
+  DB_POOL_SIZE: '5'
+
+x-small: &small
+  replicaCount: 1
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { memory: 256Mi }
+
+# Search routes: 2 s ceiling on the test instance (NFR-PERF-10); production keeps 5 s.
+catalog-svc:
+  <<: *small
+  envPlatform: *platform-env
+  ingress:
+    routes:
+      - name: api
+        paths: [/api/v1/categories, /api/v1/templates, /api/v1/activities, /api/v1/units, /api/v1/admin/catalog]
+      - name: search
+        paths: [/api/v1/catalog/search, /api/v1/catalog/suggest]
+        readTimeoutMs: 2000
+tracker-svc:
+  <<: *small
+  envPlatform: *platform-env
+records-svc:
+  <<: *small
+  envPlatform: *platform-env
+  ingress:
+    routes:
+      - name: api
+        paths: [/api/v1/sessions]
+      - name: search
+        paths: [/api/v1/sessions/search, /api/v1/entries/search]
+        readTimeoutMs: 2000
+analytics-svc:
+  <<: *small
+  envPlatform: *platform-env
+  ingress:
+    routes:
+      - name: api
+        paths: [/api/v1/analytics]
+      - name: search
+        paths: [/api/v1/analytics/sessions/search]
+        readTimeoutMs: 2000
+user-profile-svc:
+  <<: *small
+  envPlatform: *platform-env
+subscription-svc:
+  <<: *small
+  envPlatform: *platform-env
+  envExtra:
+    KEYCLOAK_ADMIN_URL: http://keycloak.trainme-platform.svc.cluster.local:8080/auth/admin/realms/trainme
+notification-svc:
+  <<: *small
+  envPlatform: *platform-env
+  envExtra:
+    SMTP_URL: smtp://mailpit.trainme-platform.svc.cluster.local:1025

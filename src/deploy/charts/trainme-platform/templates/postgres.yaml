@@ -1,0 +1,62 @@
+# CloudNativePG cluster: one PostgreSQL server, one database + role per service (created by db-bootstrap).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: trainme-pg
+  labels: {{- include "platform.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+  imageName: {{ .Values.postgres.image }}
+  imagePullPolicy: IfNotPresent
+  enableSuperuserAccess: true
+  storage:
+    size: {{ .Values.postgres.storage }}
+    storageClass: {{ .Values.storageClass }}
+  bootstrap:
+    initdb:
+      database: trainme_admin
+      owner: trainme_admin
+  postgresql:
+    shared_preload_libraries: [pg_partman_bgw]
+    parameters:
+      shared_buffers: {{ .Values.postgres.sharedBuffers | quote }}
+      work_mem: 16MB
+      random_page_cost: "1.1"
+      jit: "off"
+      max_connections: "200"
+      pg_stat_statements.track: all
+      auto_explain.log_min_duration: 300ms
+      autovacuum_vacuum_insert_scale_factor: "0.05"
+      pg_partman_bgw.interval: "3600"
+      pg_partman_bgw.role: records_svc
+      pg_partman_bgw.dbname: records_db
+  resources: {{- toYaml .Values.postgres.resources | nindent 4 }}
+---
+# Creates service databases, roles and superuser-only extensions; idempotent, runs on every upgrade.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-bootstrap
+  labels: {{- include "platform.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 20          # retries while the cluster is still starting
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "/usr/local/bin/bootstrap-databases.sh"]
+          env:
+            - { name: PGHOST, value: trainme-pg-rw }
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: trainme-pg-superuser, key: username } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: trainme-pg-superuser, key: password } }
+          envFrom:
+            - secretRef: { name: {{ .Values.secretName }} }

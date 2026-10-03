@@ -1,0 +1,28 @@
+{
+  "name": "trainme",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "format": "prettier --write \"src/**/*.{ts,tsx,js,json,md,yaml,yml}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,js,json,md,yaml,yml}\"",
+    "stack:up": "docker compose -f src/deploy/compose/docker-compose.yml --env-file src/deploy/compose/.env up -d --build",
+    "stack:down": "docker compose -f src/deploy/compose/docker-compose.yml --env-file src/deploy/compose/.env down",
+    "stack:smoke": "bash src/deploy/compose/scripts/smoke-test.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.12.0",
+    "prettier": "^3.9.9",
+    "turbo": "^2.11.7",
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  }
+}

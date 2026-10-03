@@ -1,0 +1,35 @@
+# Platform for the single-VM k3s test environment. Sized for a small VM (≈ 8 GB RAM).
+publicUrl: http://localhost # browser origin through Kong (set by install.sh)
+storageClass: local-path
+
+postgres:
+  image: trainme-postgres-cnpg:17
+  instances: 1 # 2 = primary + replica (needs more RAM)
+  storage: 10Gi
+  sharedBuffers: 512MB
+  resources:
+    requests: { cpu: 200m, memory: 768Mi }
+    limits: { memory: 1536Mi }
+
+keycloak:
+  image: quay.io/keycloak/keycloak:26.8.0
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { memory: 900Mi }
+
+valkey:
+  image: valkey/valkey:9.0.6-alpine
+  maxMemory: 128mb
+
+redpanda:
+  image: redpandadata/redpanda:v26.2.3
+  memory: 512M
+  storage: 5Gi
+
+mailpit:
+  enabled: true
+  image: axllent/mailpit:v1.31.4
+
+# Secret holding passwords (created by install.sh from secrets.env): *_DB_PASSWORD, KEYCLOAK_ADMIN_PASSWORD,
+# KEYCLOAK_SERVICES_CLIENT_SECRET, TEST_USER_PASSWORD.
+secretName: trainme-platform-secrets

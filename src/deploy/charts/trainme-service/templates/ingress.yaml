@@ -1,0 +1,51 @@
+{{- /*
+One Ingress per route. Kong reads timeouts from Service annotations, so a route with its own
+readTimeoutMs (e.g. search: 2 s on test) gets a dedicated Service selecting the same pods.
+*/}}
+{{- if .Values.ingress.enabled }}
+{{- range $route := .Values.ingress.routes }}
+{{- $backend := include "svc.name" $ }}
+{{- if $route.readTimeoutMs }}
+{{- $backend = printf "%s-%s" (include "svc.name" $) $route.name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $backend }}
+  labels: {{- include "svc.labels" $ | nindent 4 }}
+  annotations:
+    konghq.com/read-timeout: {{ $route.readTimeoutMs | quote }}
+    konghq.com/connect-timeout: "2000"
+spec:
+  type: ClusterIP
+  selector: {{- include "svc.selector" $ | nindent 4 }}
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "svc.name" $ }}-{{ $route.name }}
+  labels: {{- include "svc.labels" $ | nindent 4 }}
+  annotations:
+    konghq.com/strip-path: "false"
+    konghq.com/plugins: {{ $route.plugins | default "trainme-rate-limit" }}
+spec:
+  ingressClassName: {{ $.Values.ingress.className }}
+  rules:
+    - {{- with $.Values.ingress.host }}
+      host: {{ . }}
+      {{- end }}
+      http:
+        paths:
+          {{- range $route.paths }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backend }}
+                port: { number: 8080 }
+          {{- end }}
+{{- end }}
+{{- end }}

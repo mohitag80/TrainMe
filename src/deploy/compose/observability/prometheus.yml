@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: trainme-services
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - catalog-svc:8080
+          - tracker-svc:8080
+          - records-svc:8080
+          - analytics-svc:8080
+          - user-profile-svc:8080
+          - subscription-svc:8080
+          - notification-svc:8080
+  - job_name: kong
+    static_configs:
+      - targets: ['kong:8001']

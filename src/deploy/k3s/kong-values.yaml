@@ -1,0 +1,19 @@
+# kong/ingress chart: Kong Gateway (DB-less) + Kong Ingress Controller, sized for a small node.
+controller:
+  ingressController:
+    ingressClass: kong
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { memory: 256Mi }
+gateway:
+  replicaCount: 1
+  env:
+    nginx_worker_processes: '2'
+    dns_not_found_ttl: '2'
+  proxy:
+    type: LoadBalancer # k3s ServiceLB (klipper) binds :80 on the node
+    http: { enabled: true, servicePort: 80 }
+    tls: { enabled: false }
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 384Mi }

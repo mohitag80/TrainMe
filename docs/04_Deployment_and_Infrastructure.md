@@ -130,7 +130,7 @@ The whole test environment is reproducible from Git: provision the VM (Terraform
 ### 3.5 Infrastructure as Code (Terraform)
 
 ```
-infra/terraform/
+src/infra/terraform/
   modules/ (vpc, eks, rds, elasticache, msk, s3, iam-service-roles, waf, cloudfront, route53, ses)
   envs/beta/ (main.tf, variables.tfvars, backend.tf → S3 state + DynamoDB lock)
 ```

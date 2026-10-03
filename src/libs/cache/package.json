@@ -1,0 +1,26 @@
+{
+  "name": "@trainme/cache",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fail-open JSON cache on Valkey/Redis (cache-aside, short command timeouts)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "ioredis": "^6.0.0",
+    "@trainme/observability": "workspace:*"
+  }
+}

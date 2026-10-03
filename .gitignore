@@ -9,3 +9,27 @@ design/demo/TrainMe_Demo.mp4
 # Python
 __pycache__/
 *.pyc
+
+# Node / build output
+node_modules/
+dist/
+.next/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+src/deploy/k3s/secrets.env
+src/deploy/k3s/.last-tag
+src/deploy/charts/*/charts/
+src/deploy/charts/*/Chart.lock
+
+# Terraform / OpenTofu
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example

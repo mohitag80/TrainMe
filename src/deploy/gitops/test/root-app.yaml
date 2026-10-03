@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trainme-test
+  namespace: gitops
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mohitag80/TrainMe.git
+    targetRevision: main
+    path: src/deploy/gitops/test
+    directory: { exclude: root-app.yaml }
+  destination: { server: https://kubernetes.default.svc, namespace: gitops }
+  syncPolicy: { automated: { prune: true, selfHeal: true } }

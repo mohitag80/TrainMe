@@ -1,0 +1,323 @@
+# TrainMe local / test-VM stack (docker compose v2+).
+#   cp .env.example .env && docker compose up -d --build
+# Everything is reached through Kong on ${TRAINME_HTTP_PORT}: web app (/), APIs (/api/v1), Keycloak (/auth).
+name: trainme
+
+x-service: &service
+  build:
+    context: ../../..
+    dockerfile: src/deploy/docker/service.Dockerfile
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    redpanda-init: { condition: service_completed_successfully }
+    valkey: { condition: service_healthy }
+    keycloak: { condition: service_healthy }
+  healthcheck:
+    test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8080/health/live']
+    interval: 10s
+    timeout: 3s
+    retries: 6
+    start_period: 20s
+  deploy:
+    resources:
+      limits: { memory: 256m }
+
+x-service-env: &service-env
+  NODE_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  RUN_MIGRATIONS: 'true'
+  KAFKA_BROKERS: redpanda:9092
+  REDIS_URL: redis://valkey:6379
+  OIDC_ISSUER_URL: ${TRAINME_PUBLIC_URL}/auth/realms/trainme
+  OIDC_JWKS_URL: http://keycloak:8080/auth/realms/trainme/protocol/openid-connect/certs
+  OIDC_TOKEN_URL: http://keycloak:8080/auth/realms/trainme/protocol/openid-connect/token
+  OIDC_AUDIENCE: trainme-api
+  SERVICE_CLIENT_ID: trainme-services
+  SERVICE_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+  CATALOG_SVC_URL: http://catalog-svc:8080
+  TRACKER_SVC_URL: http://tracker-svc:8080
+  RECORDS_SVC_URL: http://records-svc:8080
+  ANALYTICS_SVC_URL: http://analytics-svc:8080
+  PROFILE_SVC_URL: http://user-profile-svc:8080
+  SUBSCRIPTION_SVC_URL: http://subscription-svc:8080
+
+services:
+  # ---------------------------------------------------------------- data
+  postgres:
+    build: ../docker/postgres
+    image: trainme-postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD}
+      TRACKER_DB_PASSWORD: ${TRACKER_DB_PASSWORD}
+      RECORDS_DB_PASSWORD: ${RECORDS_DB_PASSWORD}
+      ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD}
+      PROFILE_DB_PASSWORD: ${PROFILE_DB_PASSWORD}
+      BILLING_DB_PASSWORD: ${BILLING_DB_PASSWORD}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    # Settings from 08_Search_and_Query_Performance.md §8, scaled down for a small VM.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements,auto_explain,pg_partman_bgw
+      - -c
+      - pg_partman_bgw.interval=3600
+      - -c
+      - pg_partman_bgw.role=records_svc
+      - -c
+      - pg_partman_bgw.dbname=records_db
+      - -c
+      - auto_explain.log_min_duration=300ms
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - jit=off
+      - -c
+      - max_connections=200
+      - -c
+      - autovacuum_vacuum_insert_scale_factor=0.05
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports: ['127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432'] # host port avoids clashing with a local PostgreSQL
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d records_db']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits: { memory: 1g }
+
+  valkey:
+    image: valkey/valkey:9.0.6-alpine
+    restart: unless-stopped
+    command: ['valkey-server', '--maxmemory', '128mb', '--maxmemory-policy', 'allkeys-lru', '--save', '']
+    ports: ['127.0.0.1:6379:6379']
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits: { memory: 192m }
+
+  redpanda:
+    image: redpandadata/redpanda:v26.2.3
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+      - --schema-registry-addr=internal://0.0.0.0:8081
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    ports: ['127.0.0.1:19092:19092']
+    healthcheck:
+      test: ['CMD-SHELL', "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    deploy:
+      resources:
+        limits: { memory: 768m }
+
+  redpanda-init:
+    image: redpandadata/redpanda:v26.2.3
+    depends_on:
+      redpanda: { condition: service_healthy }
+    entrypoint: ['/bin/bash', '/scripts/create-topics.sh']
+    environment:
+      RPK_BROKERS: redpanda:9092
+    volumes:
+      - ../charts/trainme-platform/files/create-topics.sh:/scripts/create-topics.sh:ro
+
+  # ---------------------------------------------------------------- platform
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.0
+    restart: unless-stopped
+    command: ['start-dev', '--import-realm']
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak_db
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME: ${TRAINME_PUBLIC_URL}/auth
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: 'true'
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: 'true'
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      JAVA_OPTS_KC_HEAP: -Xms256m -Xmx512m
+      # Placeholders resolved inside realm-trainme.json
+      TRAINME_PUBLIC_URL: ${TRAINME_PUBLIC_URL}
+      SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}
+    volumes:
+      - ../charts/trainme-platform/files/realm-trainme.json:/opt/keycloak/data/import/realm-trainme.json:ro
+    healthcheck:
+      # Management port 9000 serves /auth/health/ready when health is enabled.
+      test:
+        [
+          'CMD-SHELL',
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { memory: 900m }
+
+  kong:
+    image: kong:3.9.3
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: 'off'
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_ADMIN_LISTEN: 127.0.0.1:8001
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_NGINX_WORKER_PROCESSES: '2'
+      # Containers come and go during restarts; do not cache "host not found" for 30 s.
+      KONG_DNS_NOT_FOUND_TTL: '2'
+      KONG_DNS_ERROR_TTL: '1'
+    volumes:
+      - ./kong/kong.yml:/kong/kong.yml:ro
+    ports: ['${TRAINME_HTTP_PORT:-8000}:8000']
+    healthcheck:
+      test: ['CMD', 'kong', 'health']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits: { memory: 256m }
+
+  mailpit:
+    image: axllent/mailpit:v1.31.4
+    restart: unless-stopped
+    ports: ['127.0.0.1:8025:8025']
+    deploy:
+      resources:
+        limits: { memory: 64m }
+
+  # ---------------------------------------------------------------- services
+  catalog-svc:
+    <<: *service
+    build: { context: ../../.., dockerfile: src/deploy/docker/service.Dockerfile, args: { SERVICE: catalog-svc } }
+    image: trainme-catalog-svc:local
+    environment:
+      <<: *service-env
+      SERVICE_NAME: catalog-svc
+      DATABASE_URL: postgres://catalog_svc:${CATALOG_DB_PASSWORD}@postgres:5432/catalog_db
+      SEED_CATALOG_ON_START: 'true'
+
+  tracker-svc:
+    <<: *service
+    build: { context: ../../.., dockerfile: src/deploy/docker/service.Dockerfile, args: { SERVICE: tracker-svc } }
+    image: trainme-tracker-svc:local
+    environment:
+      <<: *service-env
+      SERVICE_NAME: tracker-svc
+      DATABASE_URL: postgres://tracker_svc:${TRACKER_DB_PASSWORD}@postgres:5432/tracker_db
+
+  records-svc:
+    <<: *service
+    build: { context: ../../.., dockerfile: src/deploy/docker/service.Dockerfile, args: { SERVICE: records-svc } }
+    image: trainme-records-svc:local
+    environment:
+      <<: *service-env
+      SERVICE_NAME: records-svc
+      DATABASE_URL: postgres://records_svc:${RECORDS_DB_PASSWORD}@postgres:5432/records_db
+
+  analytics-svc:
+    <<: *service
+    build: { context: ../../.., dockerfile: src/deploy/docker/service.Dockerfile, args: { SERVICE: analytics-svc } }
+    image: trainme-analytics-svc:local
+    environment:
+      <<: *service-env
+      SERVICE_NAME: analytics-svc
+      DATABASE_URL: postgres://analytics_svc:${ANALYTICS_DB_PASSWORD}@postgres:5432/analytics_db
+
+  user-profile-svc:
+    <<: *service
+    build: { context: ../../.., dockerfile: src/deploy/docker/service.Dockerfile, args: { SERVICE: user-profile-svc } }
+    image: trainme-user-profile-svc:local
+    environment:
+      <<: *service-env
+      SERVICE_NAME: user-profile-svc
+      DATABASE_URL: postgres://profile_svc:${PROFILE_DB_PASSWORD}@postgres:5432/profile_db
+
+  subscription-svc:
+    <<: *service
+    build: { context: ../../.., dockerfile: src/deploy/docker/service.Dockerfile, args: { SERVICE: subscription-svc } }
+    image: trainme-subscription-svc:local
+    environment:
+      <<: *service-env
+      SERVICE_NAME: subscription-svc
+      DATABASE_URL: postgres://billing_svc:${BILLING_DB_PASSWORD}@postgres:5432/billing_db
+      PAYMENT_PROVIDER: MOCK
+      MOCK_PAYMENT_WEBHOOK_SECRET: ${MOCK_PAYMENT_WEBHOOK_SECRET}
+      PUBLIC_URL: ${TRAINME_PUBLIC_URL}
+      KEYCLOAK_ADMIN_URL: http://keycloak:8080/auth/admin/realms/trainme
+
+  notification-svc:
+    <<: *service
+    build: { context: ../../.., dockerfile: src/deploy/docker/service.Dockerfile, args: { SERVICE: notification-svc } }
+    image: trainme-notification-svc:local
+    environment:
+      <<: *service-env
+      SERVICE_NAME: notification-svc
+      DATABASE_URL: postgres://notification_svc:${NOTIFICATION_DB_PASSWORD}@postgres:5432/notification_db
+      SMTP_URL: smtp://mailpit:1025
+      MAIL_FROM: TrainMe <no-reply@trainme.test>
+
+  # ---------------------------------------------------------------- observability (optional)
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.15.0
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ['127.0.0.1:9090:9090']
+    deploy:
+      resources:
+        limits: { memory: 384m }
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:13.2.3
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    volumes:
+      - ./observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    ports: ['127.0.0.1:3001:3000']
+    deploy:
+      resources:
+        limits: { memory: 256m }
+
+volumes:
+  postgres-data:
+  redpanda-data:

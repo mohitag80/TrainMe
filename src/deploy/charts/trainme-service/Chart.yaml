@@ -1,0 +1,6 @@
+apiVersion: v2
+name: trainme-service
+description: Shared chart for every TrainMe NestJS service (Deployment, Service, HPA, PDB, Kong ingress, migration and hook Jobs)
+type: application
+version: 0.1.0
+appVersion: '0.1.0'

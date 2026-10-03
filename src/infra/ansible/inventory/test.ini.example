@@ -1,0 +1,3 @@
+# Copy to test.ini. The test VM runs Docker (Compose stack) and k3s (Kubernetes test environment).
+[trainme_test]
+mohitconcert11.fyre.ibm.com ansible_user=root

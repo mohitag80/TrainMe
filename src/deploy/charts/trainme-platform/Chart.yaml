@@ -1,0 +1,6 @@
+apiVersion: v2
+name: trainme-platform
+description: TrainMe middleware for the k3s test environment – PostgreSQL (CloudNativePG), Keycloak, Valkey, Redpanda, Mailpit, Kong plugins
+type: application
+version: 0.1.0
+appVersion: '0.1.0'

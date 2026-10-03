@@ -1,0 +1,114 @@
+# Environment-neutral defaults. Per-environment overrides: values-test.yaml (k3s), values-beta.yaml (EKS).
+# YAML anchors keep the shared env in one place.
+
+x-common-env: &common-env
+  LOG_LEVEL: info
+  OIDC_AUDIENCE: trainme-api
+  SERVICE_CLIENT_ID: trainme-services
+  CATALOG_SVC_URL: http://catalog-svc:8080
+  TRACKER_SVC_URL: http://tracker-svc:8080
+  RECORDS_SVC_URL: http://records-svc:8080
+  ANALYTICS_SVC_URL: http://analytics-svc:8080
+  PROFILE_SVC_URL: http://user-profile-svc:8080
+  SUBSCRIPTION_SVC_URL: http://subscription-svc:8080
+
+x-common-secrets: &common-secrets
+  SERVICE_CLIENT_SECRET: { secret: trainme-app-secrets, key: SERVICE_CLIENT_SECRET }
+
+catalog-svc:
+  image: { repository: trainme-catalog-svc }
+  env: *common-env
+  secretEnv:
+    <<: *common-secrets
+    DATABASE_URL: { secret: trainme-db-urls, key: catalog-svc }
+  hookJobs:
+    - name: seed
+      hook: post-install,post-upgrade
+      command: ['node', 'dist/seed.js']
+  ingress:
+    routes:
+      - name: api
+        paths: [/api/v1/categories, /api/v1/templates, /api/v1/activities, /api/v1/units, /api/v1/admin/catalog]
+      - name: search
+        paths: [/api/v1/catalog/search, /api/v1/catalog/suggest]
+        readTimeoutMs: 5000
+
+tracker-svc:
+  image: { repository: trainme-tracker-svc }
+  env: *common-env
+  secretEnv:
+    <<: *common-secrets
+    DATABASE_URL: { secret: trainme-db-urls, key: tracker-svc }
+  ingress:
+    routes:
+      - name: api
+        paths: [/api/v1/trackers]
+
+records-svc:
+  image: { repository: trainme-records-svc }
+  env: *common-env
+  secretEnv:
+    <<: *common-secrets
+    DATABASE_URL: { secret: trainme-db-urls, key: records-svc }
+  ingress:
+    routes:
+      - name: api
+        paths: [/api/v1/sessions]
+      - name: search
+        paths: [/api/v1/sessions/search, /api/v1/entries/search]
+        readTimeoutMs: 5000
+
+analytics-svc:
+  image: { repository: trainme-analytics-svc }
+  env: *common-env
+  secretEnv:
+    <<: *common-secrets
+    DATABASE_URL: { secret: trainme-db-urls, key: analytics-svc }
+  ingress:
+    routes:
+      - name: api
+        paths: [/api/v1/analytics]
+      - name: search
+        paths: [/api/v1/analytics/sessions/search]
+        readTimeoutMs: 5000
+
+user-profile-svc:
+  image: { repository: trainme-user-profile-svc }
+  env: *common-env
+  secretEnv:
+    <<: *common-secrets
+    DATABASE_URL: { secret: trainme-db-urls, key: user-profile-svc }
+  ingress:
+    routes:
+      - name: api
+        paths: [/api/v1/profiles]
+
+subscription-svc:
+  image: { repository: trainme-subscription-svc }
+  env:
+    <<: *common-env
+    PAYMENT_PROVIDER: MOCK
+  secretEnv:
+    <<: *common-secrets
+    DATABASE_URL: { secret: trainme-db-urls, key: subscription-svc }
+    MOCK_PAYMENT_WEBHOOK_SECRET: { secret: trainme-app-secrets, key: MOCK_PAYMENT_WEBHOOK_SECRET }
+  ingress:
+    routes:
+      - name: api
+        paths: [/api/v1/plans, /api/v1/subscriptions, /api/v1/webhooks/payments, /api/v1/mock-payments]
+
+notification-svc:
+  image: { repository: trainme-notification-svc }
+  env:
+    <<: *common-env
+    MAIL_FROM: TrainMe <no-reply@trainme.test>
+  secretEnv:
+    <<: *common-secrets
+    DATABASE_URL: { secret: trainme-db-urls, key: notification-svc }
+  ingress:
+    routes:
+      - name: api
+        paths: [/api/v1/reminders, /api/v1/notifications]
+
+global:
+  publicUrl: http://localhost

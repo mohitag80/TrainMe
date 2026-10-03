@@ -1,0 +1,15 @@
+# Non-secret settings for this service. Change them through Helm values (pods roll automatically),
+# or create/edit the optional "<service>-overrides" ConfigMap for an operator override, then
+# `kubectl rollout restart deployment/<service>` (settings are read once at start-up).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "svc.name" . }}-config
+  labels: {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    # Created before the migration/seed hook Jobs that also read it.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  {{- include "svc.config" . | nindent 2 }}

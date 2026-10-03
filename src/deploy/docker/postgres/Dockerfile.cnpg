@@ -1,0 +1,9 @@
+# CloudNativePG-compatible PostgreSQL 17 image with pg_partman (k3s test environment).
+# CNPG requires its own base images; we only add the partman package.
+FROM ghcr.io/cloudnative-pg/postgresql:17.11-standard-trixie
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-17-partman \
+ && rm -rf /var/lib/apt/lists/*
+COPY bootstrap-databases.sh /usr/local/bin/bootstrap-databases.sh
+USER 26

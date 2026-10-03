@@ -183,26 +183,32 @@
 
 ---
 
-## 3. Repository Layout (proposed)
+## 3. Repository Layout
+
+**All code lives under `src/`** (owner's rule). Design material and content stay at the top level.
 
 ```
-trainme/
-  apps/
-    mobile/            # React Native (Expo)
-    web/               # Next.js
-    admin/             # Next.js + Refine
-  services/
-    catalog-svc/  tracker-svc/  records-svc/  analytics-svc/
-    user-profile-svc/  subscription-svc/  notification-svc/
-  libs/                # auth, observability, kafka, errors, schema, ui-tokens, api-clients
-  deploy/
-    charts/trainme-service/   # shared Helm chart
-    charts/trainme/           # umbrella chart
-  infra/
-    terraform/                # AWS
-    ansible/                  # test VM hardening + k3s install
-  docs/                       # these design documents
-  diagrams/                   # draw.io sources + PNG exports
+TrainMe/
+  src/
+    apps/
+      mobile/            # React Native (Expo)
+      web/               # Next.js
+      admin/             # Next.js + Refine
+    services/
+      catalog-svc/  tracker-svc/  records-svc/  analytics-svc/
+      user-profile-svc/  subscription-svc/  notification-svc/
+    libs/                # auth, observability, kafka, errors, schema, units, sync, ui-tokens, api-clients
+    deploy/
+      compose/                  # Docker Compose stack for local / RHEL VM testing
+      charts/trainme-service/   # shared Helm chart
+      charts/trainme/           # umbrella chart
+    infra/
+      terraform/                # AWS
+      ansible/                  # test VM hardening + k3s install
+  catalog/                      # Phase 1 catalog content (seed JSON) + its builder script
+  docs/                         # these design documents
+  diagrams/                     # draw.io sources + PNG exports
+  design/                       # UI mockups and demo video tooling
 gitops/ (separate repo)
   bootstrap/  platform/  envs/{test,beta}/
 ```

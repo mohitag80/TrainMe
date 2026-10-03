@@ -85,6 +85,9 @@ One denormalised row per searchable item (category, template, activity), rebuilt
 ```sql
 CREATE OR REPLACE FUNCTION f_unaccent(text) RETURNS text
   LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT AS $$ SELECT public.unaccent('public.unaccent', $1) $$;
+-- array_to_string() is only STABLE, so generated columns and index expressions use this wrapper.
+CREATE OR REPLACE FUNCTION f_array_text(text[]) RETURNS text
+  LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT AS $$ SELECT array_to_string($1, ' ') $$;
 
 CREATE TABLE catalog_search_doc (
   item_type     VARCHAR(12) NOT NULL CHECK (item_type IN ('CATEGORY','TEMPLATE','ACTIVITY')),
@@ -104,14 +107,14 @@ CREATE TABLE catalog_search_doc (
   status        VARCHAR(12) NOT NULL DEFAULT 'PUBLISHED',
   search_tsv    tsvector GENERATED ALWAYS AS (
                   setweight(to_tsvector('simple', f_unaccent(name)), 'A') ||
-                  setweight(to_tsvector('simple', f_unaccent(array_to_string(synonyms, ' '))), 'B') ||
-                  setweight(to_tsvector('simple', f_unaccent(array_to_string(sports || roles || muscles || equipment, ' '))), 'C') ||
+                  setweight(to_tsvector('simple', f_unaccent(f_array_text(synonyms))), 'B') ||
+                  setweight(to_tsvector('simple', f_unaccent(f_array_text(sports || roles || muscles || equipment))), 'C') ||
                   setweight(to_tsvector('english', coalesce(description, '')), 'D')) STORED,
   PRIMARY KEY (item_type, item_code, locale)
 );
 CREATE INDEX csd_tsv      ON catalog_search_doc USING GIN (search_tsv);
 CREATE INDEX csd_name_trg ON catalog_search_doc USING GIN (f_unaccent(lower(name)) gin_trgm_ops);
-CREATE INDEX csd_syn_trg  ON catalog_search_doc USING GIN (f_unaccent(lower(array_to_string(synonyms, ' '))) gin_trgm_ops);
+CREATE INDEX csd_syn_trg  ON catalog_search_doc USING GIN (f_unaccent(lower(f_array_text(synonyms))) gin_trgm_ops);
 CREATE INDEX csd_facets   ON catalog_search_doc USING GIN (sports, roles, categories, muscles, equipment);
 ```
 
@@ -142,7 +145,7 @@ CREATE INDEX ae_session            ON activity_entry (session_id, seq_no);
 ALTER TABLE activity_session ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE activity_session ADD COLUMN search_tsv tsvector GENERATED ALWAYS AS (
   setweight(to_tsvector('simple', f_unaccent(name)), 'A') ||
-  to_tsvector('simple', f_unaccent(coalesce(notes, '') || ' ' || array_to_string(tags, ' ')))) STORED;
+  to_tsvector('simple', f_unaccent(coalesce(notes, '') || ' ' || f_array_text(tags)))) STORED;
 CREATE INDEX as_user_search ON activity_session USING GIN (user_id, search_tsv);         -- btree_gin: user first
 CREATE INDEX as_user_tracker_date ON activity_session (user_id, tracker_id, session_date DESC) WHERE deleted_at IS NULL;
 ```
@@ -187,7 +190,7 @@ SELECT item_type, item_code, name, kind, sports, roles, muscles, equipment,
        ts_rank_cd(search_tsv, q.tsq) * 2 + similarity(f_unaccent(lower(name)), q.raw) + ln(1 + popularity) * 0.05 AS score
 FROM catalog_search_doc, q
 WHERE status = 'PUBLISHED' AND locale = $2
-  AND (search_tsv @@ q.tsq OR f_unaccent(lower(name)) % q.raw OR f_unaccent(lower(array_to_string(synonyms,' '))) % q.raw)
+  AND (search_tsv @@ q.tsq OR f_unaccent(lower(name)) % q.raw OR f_unaccent(lower(f_array_text(synonyms))) % q.raw)
   AND ($3::text[] IS NULL OR sports && $3) AND ($4::text[] IS NULL OR muscles && $4) AND ($5::text[] IS NULL OR equipment && $5)
 ORDER BY score DESC, item_code
 LIMIT 20;

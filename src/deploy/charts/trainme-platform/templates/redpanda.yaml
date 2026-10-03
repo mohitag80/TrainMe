@@ -1,0 +1,80 @@
+# Single-broker Redpanda (Kafka API) for test; beta uses Amazon MSK with the same topics.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redpanda
+  labels: {{- include "platform.labels" . | nindent 4 }}
+spec:
+  serviceName: redpanda
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: redpanda } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: redpanda }
+    spec:
+      securityContext: { fsGroup: 101 }
+      containers:
+        - name: redpanda
+          image: {{ .Values.redpanda.image }}
+          args:
+            - redpanda
+            - start
+            - --mode=dev-container
+            - --smp=1
+            - --memory={{ .Values.redpanda.memory }}
+            - --reserve-memory=0M
+            - --overprovisioned
+            - --kafka-addr=internal://0.0.0.0:9092
+            - --advertise-kafka-addr=internal://redpanda.{{ .Release.Namespace }}.svc.cluster.local:9092
+          ports: [{ name: kafka, containerPort: 9092 }]
+          readinessProbe:
+            exec: { command: ["sh", "-c", "rpk cluster health | grep -q 'Healthy:.*true'"] }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 640Mi }
+            limits: { memory: 900Mi }
+          volumeMounts: [{ name: data, mountPath: /var/lib/redpanda/data }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.storageClass }}
+        resources: { requests: { storage: {{ .Values.redpanda.storage }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+  labels: {{- include "platform.labels" . | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/name: redpanda }
+  ports: [{ name: kafka, port: 9092, targetPort: kafka }]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redpanda-topics
+data:
+  create-topics.sh: |-
+{{ .Files.Get "files/create-topics.sh" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redpanda-topics
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: topics
+          image: {{ .Values.redpanda.image }}
+          command: ["bash", "/scripts/create-topics.sh"]
+          env: [{ name: RPK_BROKERS, value: "redpanda:9092" }]
+          volumeMounts: [{ name: scripts, mountPath: /scripts }]
+      volumes: [{ name: scripts, configMap: { name: redpanda-topics } }]

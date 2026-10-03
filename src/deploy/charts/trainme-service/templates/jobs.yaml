@@ -1,0 +1,40 @@
+{{- /* Migration (pre-install/pre-upgrade) and extra hook Jobs, all with the service image. */}}
+{{- $jobs := list }}
+{{- if .Values.migrations.enabled }}
+{{- $jobs = append $jobs (dict "name" "migrate" "hook" "pre-install,pre-upgrade" "weight" "-5" "command" .Values.migrations.command) }}
+{{- end }}
+{{- range .Values.hookJobs }}
+{{- $jobs = append $jobs (dict "name" .name "hook" (.hook | default "post-install,post-upgrade") "weight" (.weight | default "5") "command" .command) }}
+{{- end }}
+{{- range $job := $jobs }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "svc.name" $ }}-{{ $job.name }}
+  labels: {{- include "svc.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $job.hook }}
+    helm.sh/hook-weight: {{ $job.weight | quote }}
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels: {{- include "svc.selector" $ | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext: {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $job.name }}
+          image: {{ include "svc.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: {{- toYaml $job.command | nindent 12 }}
+          envFrom: {{- include "svc.envFrom" $ | nindent 12 }}
+          {{- with $.Values.secretEnv }}
+          env: {{- include "svc.secretEnv" $ | nindent 12 }}
+          {{- end }}
+          resources: {{- toYaml $.Values.resources | nindent 12 }}
+          securityContext: {{- toYaml $.Values.securityContext | nindent 12 }}
+{{- end }}

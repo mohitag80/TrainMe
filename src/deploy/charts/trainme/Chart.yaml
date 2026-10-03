@@ -1,0 +1,35 @@
+apiVersion: v2
+name: trainme
+description: TrainMe application – the seven services from one shared chart (same images and chart in every environment)
+type: application
+version: 0.1.0
+appVersion: '0.1.0'
+dependencies:
+  - name: trainme-service
+    alias: catalog-svc
+    version: 0.1.0
+    repository: file://../trainme-service
+  - name: trainme-service
+    alias: tracker-svc
+    version: 0.1.0
+    repository: file://../trainme-service
+  - name: trainme-service
+    alias: records-svc
+    version: 0.1.0
+    repository: file://../trainme-service
+  - name: trainme-service
+    alias: analytics-svc
+    version: 0.1.0
+    repository: file://../trainme-service
+  - name: trainme-service
+    alias: user-profile-svc
+    version: 0.1.0
+    repository: file://../trainme-service
+  - name: trainme-service
+    alias: subscription-svc
+    version: 0.1.0
+    repository: file://../trainme-service
+  - name: trainme-service
+    alias: notification-svc
+    version: 0.1.0
+    repository: file://../trainme-service

@@ -1,0 +1,26 @@
+# Gateway policies shared by every route (same as the Compose kong.yml).
+apiVersion: configuration.konghq.com/v1
+kind: KongClusterPlugin
+metadata:
+  name: trainme-correlation-id
+  annotations: { kubernetes.io/ingress.class: kong }
+  labels: { global: 'true' }
+plugin: correlation-id
+config: { header_name: X-Request-ID, generator: uuid, echo_downstream: true }
+---
+apiVersion: configuration.konghq.com/v1
+kind: KongClusterPlugin
+metadata:
+  name: trainme-size-limit
+  annotations: { kubernetes.io/ingress.class: kong }
+  labels: { global: 'true' }
+plugin: request-size-limiting
+config: { allowed_payload_size: 1, size_unit: megabytes }
+---
+apiVersion: configuration.konghq.com/v1
+kind: KongClusterPlugin
+metadata:
+  name: trainme-rate-limit
+  annotations: { kubernetes.io/ingress.class: kong }
+plugin: rate-limiting
+config: { second: 30, minute: 1200, policy: local, limit_by: ip, fault_tolerant: true }

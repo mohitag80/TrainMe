@@ -1,0 +1,19 @@
+# Wave 4–5: the services (migrations run as PreSync-equivalent Helm hooks, catalog seed as PostSync).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trainme
+  namespace: gitops
+  annotations: { argocd.argoproj.io/sync-wave: '4' }
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mohitag80/TrainMe.git
+    targetRevision: main
+    path: src/deploy/charts/trainme
+    helm:
+      valueFiles: [values-test.yaml]
+      parameters:
+        - { name: global.publicUrl, value: 'http://mohitconcert11.fyre.ibm.com' }
+  destination: { server: https://kubernetes.default.svc, namespace: trainme }
+  syncPolicy: { automated: { selfHeal: true }, syncOptions: [CreateNamespace=true] }

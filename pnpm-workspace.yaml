@@ -1,0 +1,18 @@
+packages:
+  - src/libs/*
+  - src/services/*
+  - src/apps/*
+
+# Packages allowed to run install scripts (native builds).
+onlyBuiltDependencies:
+  - esbuild
+  - '@swc/core'
+  - sharp
+  - unrs-resolver
+
+# `pnpm deploy` copies workspace dependencies into each service image.
+injectWorkspacePackages: true
+
+minimumReleaseAgeExclude:
+  - eslint@10.12.0
+  - pino@10.4.0

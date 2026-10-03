@@ -1,0 +1,76 @@
+# Defaults for one service; the umbrella chart (charts/trainme) sets one block per service.
+nameOverride: '' # defaults to the release/alias name, e.g. records-svc
+
+image:
+  repository: trainme-service
+  tag: local
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+containerPort: 8080
+
+global:
+  publicUrl: '' # browser origin; sets OIDC_ISSUER_URL and PUBLIC_URL
+
+# Plain env vars (non-secret), merged in this order: env → envPlatform → envExtra.
+env: {}
+envPlatform: {}
+envExtra: {}
+# Whole Secret mounted as env vars.
+envFromSecrets: []
+# Individual keys: NAME: { secret: <name>, key: <key> }
+secretEnv: {}
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { memory: 256Mi }
+
+probes:
+  liveness: { path: /health/live, periodSeconds: 10, failureThreshold: 3 }
+  readiness: { path: /health/ready, periodSeconds: 10, failureThreshold: 3 }
+  startup: { path: /health/live, periodSeconds: 3, failureThreshold: 40 }
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# SQL migrations as a pre-install/pre-upgrade hook (LLD §10). Same image, `node dist/migrate.js`.
+migrations:
+  enabled: true
+  command: ['node', 'dist/migrate.js']
+
+# Extra one-off hook Jobs, e.g. the catalog seed (post-install/post-upgrade).
+hookJobs: []
+#  - name: seed
+#    hook: post-install,post-upgrade
+#    command: ["node", "dist/seed.js"]
+
+# Kong ingress rules. Each entry becomes one Ingress (paths share the same timeouts).
+ingress:
+  enabled: true
+  className: kong
+  host: ''
+  routes: []
+#  - name: api
+#    paths: [/api/v1/sessions]
+#    readTimeoutMs: 15000
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+
+terminationGracePeriodSeconds: 30
+nodeSelector: {}
+tolerations: []
+affinity: {}

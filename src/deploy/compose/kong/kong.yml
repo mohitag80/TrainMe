@@ -1,0 +1,120 @@
+# Kong DB-less configuration for Compose. Kubernetes uses the same routes as Ingress + KongPlugin CRDs.
+# Path prefixes are matched longest-first, so the /search services (short timeouts) win over the general ones.
+_format_version: '3.0'
+
+plugins:
+  - name: correlation-id
+    config: { header_name: X-Request-ID, generator: uuid, echo_downstream: true }
+  - name: request-size-limiting
+    config: { allowed_payload_size: 1, size_unit: megabytes }
+  - name: rate-limiting
+    config: { second: 30, minute: 1200, policy: local, limit_by: ip, fault_tolerant: true }
+
+services:
+  # ---------------- catalog-svc
+  - name: catalog-svc
+    url: http://catalog-svc:8080
+    connect_timeout: 2000
+    read_timeout: 10000
+    routes:
+      - name: catalog-api
+        strip_path: false
+        paths: [/api/v1/categories, /api/v1/templates, /api/v1/activities, /api/v1/units, /api/v1/admin/catalog]
+  - name: catalog-search
+    url: http://catalog-svc:8080
+    connect_timeout: 1000
+    read_timeout: 2000 # k3s/test ceiling (NFR-PERF-10); production uses 5000
+    routes:
+      - name: catalog-search
+        strip_path: false
+        paths: [/api/v1/catalog/search, /api/v1/catalog/suggest]
+
+  # ---------------- tracker-svc
+  - name: tracker-svc
+    url: http://tracker-svc:8080
+    connect_timeout: 2000
+    read_timeout: 10000
+    routes:
+      - name: tracker-api
+        strip_path: false
+        paths: [/api/v1/trackers]
+
+  # ---------------- records-svc
+  - name: records-svc
+    url: http://records-svc:8080
+    connect_timeout: 2000
+    read_timeout: 15000
+    routes:
+      - name: records-api
+        strip_path: false
+        paths: [/api/v1/sessions]
+  - name: records-search
+    url: http://records-svc:8080
+    connect_timeout: 1000
+    read_timeout: 2000
+    routes:
+      - name: records-search
+        strip_path: false
+        paths: [/api/v1/sessions/search, /api/v1/entries/search]
+
+  # ---------------- analytics-svc
+  - name: analytics-svc
+    url: http://analytics-svc:8080
+    connect_timeout: 2000
+    read_timeout: 10000
+    routes:
+      - name: analytics-api
+        strip_path: false
+        paths: [/api/v1/analytics]
+  - name: analytics-search
+    url: http://analytics-svc:8080
+    connect_timeout: 1000
+    read_timeout: 2000
+    routes:
+      - name: analytics-search
+        strip_path: false
+        paths: [/api/v1/analytics/sessions/search]
+
+  # ---------------- user-profile-svc
+  - name: user-profile-svc
+    url: http://user-profile-svc:8080
+    routes:
+      - name: profile-api
+        strip_path: false
+        paths: [/api/v1/profiles]
+
+  # ---------------- subscription-svc
+  - name: subscription-svc
+    url: http://subscription-svc:8080
+    routes:
+      - name: subscription-api
+        strip_path: false
+        paths: [/api/v1/plans, /api/v1/subscriptions, /api/v1/webhooks/payments, /api/v1/mock-payments]
+
+  # ---------------- notification-svc
+  - name: notification-svc
+    url: http://notification-svc:8080
+    routes:
+      - name: notification-api
+        strip_path: false
+        paths: [/api/v1/reminders, /api/v1/notifications]
+
+  # ---------------- Keycloak (login pages, OIDC endpoints)
+  - name: keycloak
+    url: http://keycloak:8080
+    read_timeout: 30000
+    routes:
+      - name: keycloak
+        strip_path: false
+        preserve_host: true
+        paths: [/auth]
+
+  # ---------------- web app (catch-all)
+  - name: web
+    url: http://web:3000
+    read_timeout: 30000
+    routes:
+      - name: web
+        strip_path: false
+        preserve_host: true
+        paths: [/]

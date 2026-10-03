@@ -1,0 +1,18 @@
+# Wave 2–3: PostgreSQL, Keycloak, Valkey, Redpanda, Mailpit.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trainme-platform
+  namespace: gitops
+  annotations: { argocd.argoproj.io/sync-wave: '2' }
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mohitag80/TrainMe.git
+    targetRevision: main
+    path: src/deploy/charts/trainme-platform
+    helm:
+      parameters:
+        - { name: publicUrl, value: 'http://mohitconcert11.fyre.ibm.com' }
+  destination: { server: https://kubernetes.default.svc, namespace: trainme-platform }
+  syncPolicy: { automated: { selfHeal: true }, syncOptions: [CreateNamespace=true] }
