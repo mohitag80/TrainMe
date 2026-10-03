@@ -492,6 +492,9 @@ importers:
       kysely:
         specifier: ^0.29.6
         version: 0.29.6
+      nodemailer:
+        specifier: ^10.0.14
+        version: 10.0.14
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -591,6 +594,9 @@ importers:
       '@trainme/events':
         specifier: workspace:*
         version: link:../../libs/events
+      '@trainme/http-client':
+        specifier: workspace:*
+        version: link:../../libs/http-client
       '@trainme/kafka':
         specifier: workspace:*
         version: link:../../libs/kafka
@@ -1544,6 +1550,10 @@ packages:
 
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
+
+  nodemailer@10.0.14:
+    resolution: {integrity: sha512-eJoLFKg55fesSlzUekmfOv/SBXh4KUYT8oiQc2RLP0tfG0rbNMJBK7wgHJwXTJwqyKlSJMz9UzDZ4v+aHEvo8g==}
+    engines: {node: '>=20.0.0'}
 
   obug@2.2.1:
     resolution: {integrity: sha512-XrsrhT5sybtKI6wakr2SPOlGZWWYbUXZ7a0jT8/QOeAPau+1X/bSegNe5YR75oJmEZQbKningirmGOEJCIk61Q==}
@@ -2704,6 +2714,8 @@ snapshots:
   nanoid@3.3.19: {}
 
   natural-compare@1.4.0: {}
+
+  nodemailer@10.0.14: {}
 
   obug@2.2.1: {}
 

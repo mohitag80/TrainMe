@@ -87,6 +87,10 @@ export class ServiceClient {
     return this.request<T>('POST', path, body, o);
   }
 
+  put<T>(path: string, body: unknown, o: RequestOptions = {}): Promise<T> {
+    return this.request<T>('PUT', path, body, o);
+  }
+
   private async request<T>(method: string, path: string, body: unknown, o: RequestOptions): Promise<T> {
     if (Date.now() < this.openUntil) throw ProblemError.upstream(this.opts.name);
     const attempts = method === 'GET' ? 1 + (this.opts.retries ?? 2) : 1;

@@ -26,6 +26,7 @@
     "@trainme/db": "workspace:*",
     "@trainme/errors": "workspace:*",
     "@trainme/events": "workspace:*",
+    "@trainme/http-client": "workspace:*",
     "@trainme/kafka": "workspace:*",
     "@trainme/observability": "workspace:*",
     "@trainme/service-kit": "workspace:*",

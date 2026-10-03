@@ -9,6 +9,9 @@ export interface AuthUser {
   id: string;
   roles: Role[];
   plan: string;
+  /** From the token (profile bootstrap only; services never log or store it elsewhere). */
+  email?: string;
+  name?: string;
   /** Raw bearer token, forwarded on user-scoped service-to-service calls. */
   token: string;
 }
@@ -25,6 +28,8 @@ export interface TokenVerifierOptions {
 interface KeycloakClaims extends JWTPayload {
   realm_access?: { roles?: string[] };
   plan?: string;
+  email?: string;
+  name?: string;
 }
 
 /**
@@ -45,7 +50,14 @@ export function createTokenVerifier(opts: TokenVerifierOptions) {
       const roles = (payload.realm_access?.roles ?? []).filter((r): r is Role =>
         (ROLES as readonly string[]).includes(r),
       );
-      return { id: payload.sub, roles, plan: payload.plan ?? 'FREE', token };
+      return {
+        id: payload.sub,
+        roles,
+        plan: payload.plan ?? 'FREE',
+        ...(payload.email ? { email: payload.email } : {}),
+        ...(payload.name ? { name: payload.name } : {}),
+        token,
+      };
     } catch {
       throw ProblemError.unauthorized();
     }
