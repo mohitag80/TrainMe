@@ -360,12 +360,18 @@ importers:
       '@trainme/events':
         specifier: workspace:*
         version: link:../../libs/events
+      '@trainme/http-client':
+        specifier: workspace:*
+        version: link:../../libs/http-client
       '@trainme/kafka':
         specifier: workspace:*
         version: link:../../libs/kafka
       '@trainme/observability':
         specifier: workspace:*
         version: link:../../libs/observability
+      '@trainme/schema':
+        specifier: workspace:*
+        version: link:../../libs/schema
       '@trainme/service-kit':
         specifier: workspace:*
         version: link:../../libs/service-kit
