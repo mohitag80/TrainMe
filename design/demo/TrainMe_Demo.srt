@@ -1,0 +1,371 @@
+1
+00:00:00,700 --> 00:00:04,431
+Welcome to TrainMe, the training tracker for athletes and gym-goers.
+
+2
+00:00:04,481 --> 00:00:16,999
+In the next few minutes we will walk through the member experience on mobile and web, from sign-up to logging every ball of a bowling session, charts, history and comparisons, and then the admin console that runs the platform.
+
+3
+00:00:18,449 --> 00:00:20,757
+TrainMe is one platform with three apps.
+
+4
+00:00:20,807 --> 00:00:25,003
+The mobile app is where athletes log sessions live, even without signal.
+
+5
+00:00:25,053 --> 00:00:29,308
+The web app gives a big-screen view of progress, history and comparisons.
+
+6
+00:00:29,358 --> 00:00:35,559
+And the admin console is where the team curates the activity catalog, supports users and manages releases.
+
+7
+00:00:36,708 --> 00:00:38,060
+Getting started is quick.
+
+8
+00:00:38,110 --> 00:00:41,422
+A new member can sign up with one tap using Apple or Google.
+
+9
+00:00:41,472 --> 00:00:46,970
+Or they enter their name, email and a password, and a live strength meter guides them as they type.
+
+10
+00:00:47,020 --> 00:00:53,079
+Consent to the terms and privacy policy is explicit, and the create account button stays clear and prominent.
+
+11
+00:00:54,229 --> 00:00:56,495
+Next, onboarding personalises the app.
+
+12
+00:00:56,545 --> 00:01:02,469
+The member picks what they train, here cricket and gym, then their role in cricket, a fast bowler.
+
+13
+00:01:02,519 --> 00:01:05,151
+Roles only appear for sports that have them.
+
+14
+00:01:05,201 --> 00:01:07,894
+Tennis and badminton, for example, have none.
+
+15
+00:01:07,944 --> 00:01:13,319
+Finally they choose metric or imperial units, and TrainMe recommends the right templates.
+
+16
+00:01:14,469 --> 00:01:18,230
+Returning members log in in a second with Face ID or a passkey.
+
+17
+00:01:18,280 --> 00:01:25,307
+Email and password, and Apple or Google, are always available, with a forgot-password link right where you expect it.
+
+18
+00:01:25,357 --> 00:01:33,896
+Behind the scenes, TrainMe uses the industry-standard OpenID Connect flow with PKCE, and short-lived tokens are stored securely on the device.
+
+19
+00:01:35,046 --> 00:01:37,855
+On a laptop, the same account opens the web app.
+
+20
+00:01:37,905 --> 00:01:43,096
+The sign-in page is designed to be inviting, with a preview of what you will see inside.
+
+21
+00:01:43,146 --> 00:01:51,732
+Members can use a passkey, Google, Apple or email, and choose to stay signed in on trusted devices, which they can review and revoke at any time.
+
+22
+00:01:52,882 --> 00:01:55,482
+The home screen shows training at a glance.
+
+23
+00:01:55,532 --> 00:02:04,293
+A streak counter keeps motivation high, the weekly ring shows progress towards the goal, and every personal tracker has a one-tap start button.
+
+24
+00:02:04,343 --> 00:02:09,900
+New personal bests, like a top speed of 138 kilometres per hour, are celebrated right here.
+
+25
+00:02:11,050 --> 00:02:14,003
+To add something new, members explore the catalog.
+
+26
+00:02:14,053 --> 00:02:20,252
+Search is forgiving of typos and synonyms, so searching yorker finds the right bowling drills instantly.
+
+27
+00:02:20,302 --> 00:02:28,182
+You can also browse the tree, from sports to cricket, bowling and fast bowler, and filter by sport, role, equipment or muscle group.
+
+28
+00:02:29,332 --> 00:02:40,407
+The Fast Bowler template shows exactly what will be tracked: speed, line and length, and an attempted and accurate pair for every skill, yorker, seam, bouncer, swing and slower ball.
+
+29
+00:02:40,457 --> 00:02:42,730
+One tap adds it as a personal tracker.
+
+30
+00:02:42,780 --> 00:02:44,747
+Here it is named My Fast Bowling.
+
+31
+00:02:45,897 --> 00:02:49,977
+Every athlete trains differently, so trackers are fully customisable.
+
+32
+00:02:50,027 --> 00:02:53,687
+Here the bowler adds a new yes or no field called slower ball.
+
+33
+00:02:53,737 --> 00:02:57,817
+Fields can be conditional, appearing only when another answer is yes.
+
+34
+00:02:57,867 --> 00:03:03,801
+And TrainMe can automatically create a ratio metric, slower-ball rate, so it shows up in the charts.
+
+35
+00:03:03,851 --> 00:03:05,836
+The shared template never changes.
+
+36
+00:03:06,986 --> 00:03:08,321
+Now the session begins.
+
+37
+00:03:08,371 --> 00:03:14,881
+The live screen shows a timer and an over and ball counter, because deliveries are grouped into overs of six.
+
+38
+00:03:14,931 --> 00:03:21,322
+Live stats, like balls bowled, yorker accuracy so far and average speed, update instantly after every ball.
+
+39
+00:03:21,372 --> 00:03:24,752
+The sync indicator shows the session is safely backed up.
+
+40
+00:03:25,903 --> 00:03:27,489
+Logging a ball takes seconds.
+
+41
+00:03:27,539 --> 00:03:32,005
+Nudge the speed with the stepper, tap the line on the pitch and pick the length.
+
+42
+00:03:32,055 --> 00:03:36,125
+Toggle yorker attempted, and only then does the accurate question appear.
+
+43
+00:03:36,175 --> 00:03:40,527
+That is a conditional field, so the form stays short and the data stays clean.
+
+44
+00:03:40,577 --> 00:03:44,026
+The ball is saved on the phone instantly, even with no signal.
+
+45
+00:03:45,176 --> 00:03:47,943
+Cricket grounds and gyms often have poor signal.
+
+46
+00:03:47,993 --> 00:03:54,221
+TrainMe saves every ball on the device first, so nothing is lost if the network drops or the app is closed.
+
+47
+00:03:54,271 --> 00:04:00,030
+Every three to five minutes, and whenever the connection returns, a checkpoint syncs the new balls.
+
+48
+00:04:00,080 --> 00:04:04,606
+Each ball has its own ID, so even if a sync is retried, nothing is duplicated.
+
+49
+00:04:05,756 --> 00:04:14,191
+When the bowler taps end session, the app sends any remaining balls, and the server confirms that all fifty arrived before marking the session complete.
+
+50
+00:04:14,241 --> 00:04:23,904
+The summary shows each skill as a ratio with its counts: yorkers twelve out of eighteen, seam twenty-three out of thirty, bouncers five out of eight, and just three no-balls.
+
+51
+00:04:23,954 --> 00:04:27,198
+Notes can be added, and new personal bests are highlighted.
+
+52
+00:04:28,348 --> 00:04:32,003
+On the web app, the progress page turns sessions into insight.
+
+53
+00:04:32,053 --> 00:04:34,692
+Switch between day, week and month instantly.
+
+54
+00:04:34,742 --> 00:04:45,509
+Ratio charts are calculated correctly across sessions, by adding up the accurate and attempted counts, and the tooltip shows both: sixty-six point seven percent, twelve of eighteen.
+
+55
+00:04:45,559 --> 00:04:50,410
+Smaller charts track average speed trending up and the no-ball rate trending down.
+
+56
+00:04:51,560 --> 00:04:54,031
+The sessions page keeps the full history.
+
+57
+00:04:54,081 --> 00:05:03,010
+Filter by date range, search your notes, for example new run-up, or find sessions by a metric, such as yorker accuracy of seventy percent or more.
+
+58
+00:05:03,060 --> 00:05:08,053
+Results come back in milliseconds, even with thousands of users logging every day.
+
+59
+00:05:08,103 --> 00:05:11,189
+Tick a few sessions, and compare them side by side.
+
+60
+00:05:12,339 --> 00:05:14,733
+The compare view puts sessions side by side.
+
+61
+00:05:14,783 --> 00:05:21,010
+Grouped bars show every skill metric for the nineteenth of September, the twenty-sixth, and the third of October.
+
+62
+00:05:21,060 --> 00:05:26,176
+The speed-by-over chart shows the bowler is now faster and more consistent through the spell.
+
+63
+00:05:26,226 --> 00:05:34,453
+And the delta panel spells it out: yorker accuracy up sixteen points, average speed up three point four, and two fewer no-balls since the new run-up.
+
+64
+00:05:35,603 --> 00:05:38,847
+The same engine works for every sport and for the gym.
+
+65
+00:05:38,897 --> 00:05:42,569
+Here is a push day: each set records reps, weight and effort.
+
+66
+00:05:42,619 --> 00:05:46,656
+Mark a set as taken to failure, and an assisted reps field appears.
+
+67
+00:05:46,706 --> 00:05:58,553
+TrainMe calculates training volume and an estimated one-rep max automatically, and the exercises come from a shared library organised by muscle group: chest, back, shoulders, arms, legs and core.
+
+68
+00:05:59,703 --> 00:06:01,169
+TrainMe is free to start.
+
+69
+00:06:01,219 --> 00:06:04,322
+The plans page compares Free, Pro and Elite clearly.
+
+70
+00:06:04,372 --> 00:06:10,326
+Pro unlocks unlimited trackers, custom parameters and full history, with a fourteen-day free trial.
+
+71
+00:06:10,376 --> 00:06:16,754
+Checkout is handled by the payment provider or the app store, so card details are never stored by TrainMe.
+
+72
+00:06:17,904 --> 00:06:18,927
+Now the team side.
+
+73
+00:06:18,977 --> 00:06:22,919
+The admin console is a separate app with its own role-based access.
+
+74
+00:06:22,969 --> 00:06:31,677
+Every admin must complete multi-factor authentication, here with a six-digit code, and every admin action is written to a tamper-evident audit log.
+
+75
+00:06:32,827 --> 00:06:43,436
+The overview shows the platform at a glance: over ten thousand registered users, nearly seven thousand active today, twenty-one thousand sessions, and the Pro conversion rate.
+
+76
+00:06:43,486 --> 00:06:47,578
+A live chart shows sessions by hour, peaking after evening training.
+
+77
+00:06:47,628 --> 00:06:56,228
+The system health panel compares key numbers with their targets: API latency, search response time, sync lag and error rate, all in the green.
+
+78
+00:06:57,378 --> 00:07:02,913
+The catalog manager is where curators add sports, drills and exercises without writing code.
+
+79
+00:07:02,963 --> 00:07:07,587
+They browse the tree, then edit an activity's fields, conditions and metrics.
+
+80
+00:07:07,637 --> 00:07:11,594
+Here a new field, wide reason, appears only when a ball is a wide.
+
+81
+00:07:11,644 --> 00:07:14,872
+The metric builder defines yorker accuracy as a ratio.
+
+82
+00:07:14,922 --> 00:07:19,971
+Before publishing version three, TrainMe validates everything and shows the changes.
+
+83
+00:07:20,021 --> 00:07:24,403
+Existing trackers stay on version two until each user chooses to upgrade.
+
+84
+00:07:25,553 --> 00:07:31,505
+For support, admins can find a user and see what they need to help, while personal data stays masked.
+
+85
+00:07:31,555 --> 00:07:38,103
+The profile shows the plan and renewal date, signed-in devices, and sync status, including the last checkpoint.
+
+86
+00:07:38,153 --> 00:07:41,966
+Health and training data is hidden unless the user gives consent.
+
+87
+00:07:42,016 --> 00:07:48,503
+Safe actions like revoking sessions or resending a verification email are one click away, and each is audited.
+
+88
+00:07:49,653 --> 00:07:51,674
+New features are rolled out safely.
+
+89
+00:07:51,724 --> 00:07:58,420
+Feature flags turn them on for a percentage of users, for example the new chart design for ten percent of members.
+
+90
+00:07:58,470 --> 00:08:04,988
+Releases go out as canaries: a small share of traffic first, with automatic rollback if errors or latency rise.
+
+91
+00:08:05,038 --> 00:08:07,710
+And every change is recorded in the audit log.
+
+92
+00:08:08,860 --> 00:08:23,217
+That's TrainMe: intuitive sign-up and login, live ball-by-ball logging that works offline, clear charts, searchable history and side-by-side comparisons, plus an admin console that manages the catalog, users and releases without code.
+
+93
+00:08:23,267 --> 00:08:24,633
+Thank you for watching.

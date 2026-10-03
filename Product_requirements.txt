@@ -1,0 +1,28 @@
+I want to develop a application which users can use to track their daily work. Work could be anything like Gym workout, Diet , sports training practice session activities etc
+It will be hosted as LIVE product where subscribed users will create their profile and select type of excersize to track. Based on pre-defined profiles , activities associated activities will be listed for user to select to track.
+
+For example: A user can select Bowler's profile from Sports->Cricket->Bowler profile and activities like speed per ball, seam landing yes or no, non balls yes or no, bouncer yes or now, yorker yes or no, legspin yes or no, etc. can be loaded and user can fill record reach parameter for that day.
+Similarly, for Gym workouts, different exercises and sub prameters like count and weight etc. can be recorded.
+
+Once record then user should able to view the chart of their records on daily, weekly, monthly basis.
+
+Technical Requirements:
+
+1. Product should be proper microservices based application so that each component can be scaled independently.= as user subscriptions grow. 
+
+2. Database design should be flexible to accommodate different types of activities and their associated parameters. A NoSQL database like MongoDB or a relational database like PostgreSQL can be used based on the complexity of the data.
+
+3. The application should have a user authentication and authorization system to manage user profiles and subscriptions securely.
+
+4. Applicatio should able to serve Mobile Apps from day 1.
+
+5. UI should be intuitive and user-friendly, allowing users to easily navigate through their profiles, select activities, and input their daily records, both on mobile device and laptop.
+
+6. User should able to handle thousands of users concurrently without performance degradation. Load balancing and caching mechanisms should be implemented to ensure smooth performance.
+
+7. Debug and trace logs should be implemented to monitor application performance and identify issues quickly.
+
+8. Design and implementation should be extensible enough to accommodate future enhancements, such as adding new activity types, parameters, and features without major overhauls.
+
+9. User should be allowed to add or edits parameters in activities based on their personal requirements. For example, if a user wants to track a new parameter for their workout or sports activity, they should be able to add it easily.
+

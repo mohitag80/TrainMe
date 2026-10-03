@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Demo video build output (regenerate with design/tools/build_video.py)
+design/demo/_work/
+# >100 MB, over GitHub's per-file limit
+design/demo/TrainMe_Demo.mp4
+
+# Python
+__pycache__/
+*.pyc
