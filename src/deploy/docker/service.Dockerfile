@@ -14,7 +14,7 @@ COPY src ./src
 RUN --mount=type=cache,id=pnpm,target=/pnpm-store \
     pnpm install --offline --frozen-lockfile --filter "@trainme/${SERVICE}..." \
  && pnpm turbo run build --filter "@trainme/${SERVICE}..." \
- && pnpm deploy --offline --filter "@trainme/${SERVICE}" --prod /out
+ && pnpm deploy --filter "@trainme/${SERVICE}" --prod /out
 
 FROM ${NODE_IMAGE} AS runtime
 ENV NODE_ENV=production PORT=8080
