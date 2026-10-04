@@ -15,12 +15,13 @@
 
 | Environment | Where | Entry point (Kong) | Status |
 |---|---|---|---|
-| **Test VM – Docker Compose** | `mohitconcert11.fyre.ibm.com` (RHEL 9.8, 4 vCPU, 7.6 GB), code in `/opt/trainme` | http://mohitconcert11.fyre.ibm.com:8000 | ✅ running Phase 1 |
-| Laptop – Docker Compose | Colima | http://localhost:8000 | for development |
+| **Test VM – Docker Compose** | `mohitconcert11.fyre.ibm.com` (RHEL 9.8, 4 vCPU, 7.6 GB), code in `/opt/trainme` | **https://mohitconcert11.fyre.ibm.com:8443** (self-signed certificate – accept the browser warning once) | ✅ all services + web |
+| Laptop – Docker Compose | Colima | http://localhost:8000 (or https://localhost:8443) | for development |
 | Test VM – k3s | same VM (Kubernetes) | http://mohitconcert11.fyre.ibm.com | ⏳ after all services exist |
 | AWS beta | EKS (Terraform in `src/infra/terraform/envs/beta`) | – | ⏳ not provisioned |
 
-Everything is reached through **Kong** on one origin:
+Everything is reached through **Kong** on one origin. Off `localhost`, use **HTTPS** (port 8443): Keycloak's login cookies are `Secure; SameSite=None`, which browsers drop over plain HTTP on a remote host.
+
 
 | Path | Goes to |
 |---|---|
@@ -59,6 +60,10 @@ docker compose up -d --build postgres valkey redpanda redpanda-init keycloak kon
 docker compose ps
 ```
 
+For a remote VM set `TRAINME_PUBLIC_URL=https://<vm-hostname>:8443` (Kong serves HTTPS on 8443 with its built-in
+self-signed certificate). If the public URL changes after the first start, run
+`scripts/keycloak-set-public-url.sh` (the realm file is only imported once).
+
 > ⚠️ `.env` is created **once**. Database passwords are written into the database on first start; changing
 > them later in `.env` alone breaks the services. To reset everything see §2.4.
 
@@ -71,6 +76,13 @@ git archive --format=tar HEAD | ssh root@mohitconcert11.fyre.ibm.com \
 # VM
 cd /opt/trainme/src/deploy/compose
 docker compose up -d --build catalog-svc              # rebuild + restart one service (migrations run on start)
+```
+
+After an update that changes catalog search logic, rebuild the search documents (idempotent, no new versions):
+
+```bash
+docker compose exec postgres psql -U postgres -d catalog_db -c "DELETE FROM catalog_seed_run"
+docker compose restart catalog-svc && docker compose exec valkey valkey-cli INCR cat:version
 ```
 
 ### 2.3 Stop / start
@@ -133,8 +145,8 @@ and is sent as `Authorization: Bearer <token>`. Services verify it with Keycloak
 ### 4.1 With curl (test-only password grant)
 
 ```bash
-H=http://mohitconcert11.fyre.ibm.com:8000
-TOKEN=$(curl -s -d grant_type=password -d client_id=trainme-cli \
+H=https://mohitconcert11.fyre.ibm.com:8443          # add -k to curl (self-signed certificate)
+TOKEN=$(curl -sk -d grant_type=password -d client_id=trainme-cli \
   -d username=coach@trainme.test -d 'password=Passw0rd!' \
   $H/auth/realms/trainme/protocol/openid-connect/token | jq -r .access_token)
 
@@ -150,7 +162,7 @@ Authorization → **OAuth 2.0**:
 | Field | Value |
 |---|---|
 | Grant type | Password Credentials |
-| Access Token URL | `http://mohitconcert11.fyre.ibm.com:8000/auth/realms/trainme/protocol/openid-connect/token` |
+| Access Token URL | `https://mohitconcert11.fyre.ibm.com:8443/auth/realms/trainme/protocol/openid-connect/token` (turn off SSL verification for the self-signed certificate) |
 | Client ID | `trainme-cli` (no secret) |
 | Username / Password | a test user, e.g. `coach@trainme.test` / `Passw0rd!` |
 
@@ -160,7 +172,7 @@ Decode at https://jwt.io:
 
 ```json
 {
-  "iss": "http://mohitconcert11.fyre.ibm.com:8000/auth/realms/trainme",
+  "iss": "https://mohitconcert11.fyre.ibm.com:8443/auth/realms/trainme",
   "aud": ["trainme-api", "account"],
   "sub": "<user id – the user_id in every service database>",
   "realm_access": { "roles": ["member", "curator", "..."] },
@@ -191,12 +203,12 @@ Decode at https://jwt.io:
 
 ### 5.1 Self-registration (browser)
 
-Open http://mohitconcert11.fyre.ibm.com:8000/auth/realms/trainme/account → **Register**. New users get the
+Open https://mohitconcert11.fyre.ibm.com:8443/ → **Create account** (or `/auth/realms/trainme/account` → **Register**). New users get the
 `member` role; without a `plan` attribute they are treated as `FREE`.
 
 ### 5.2 Keycloak admin console (browser)
 
-1. http://mohitconcert11.fyre.ibm.com:8000/auth/admin – user `admin`, password = `KEYCLOAK_ADMIN_PASSWORD`:
+1. https://mohitconcert11.fyre.ibm.com:8443/auth/admin – user `admin`, password = `KEYCLOAK_ADMIN_PASSWORD`:
    `ssh root@mohitconcert11.fyre.ibm.com "grep ^KEYCLOAK_ADMIN_PASSWORD= /opt/trainme/src/deploy/compose/.env"`
 2. Switch realm (top-left) to **trainme** → **Users** → **Add user** (username = email, tick *Email verified*).
 3. **Credentials** tab → *Set password* (turn *Temporary* off).
@@ -230,7 +242,7 @@ A new token is needed after role or plan changes (claims are copied at login).
 
 ## 6. Service APIs
 
-Base URL: `http://mohitconcert11.fyre.ibm.com:8000/api/v1`. Errors are RFC 9457 `application/problem+json`
+Base URL: `https://mohitconcert11.fyre.ibm.com:8443/api/v1` (curl needs `-k` for the self-signed certificate). Errors are RFC 9457 `application/problem+json`
 (`type`, `title`, `status`, `detail`, field `errors[]` with JSON pointers). Every response carries `X-Request-ID`
 (quote it when reporting a problem; it is in the service logs).
 
@@ -523,7 +535,7 @@ The VM has ~8 GB RAM: stop the Compose stack first (`docker compose down`).
 ### 13.1 Automated smoke test
 
 ```bash
-BASE_URL=http://mohitconcert11.fyre.ibm.com:8000 src/deploy/compose/scripts/smoke-test.sh
+BASE_URL=https://mohitconcert11.fyre.ibm.com:8443 src/deploy/compose/scripts/smoke-test.sh
 ```
 
 Checks login for a member and a curator, all catalog endpoints, typo search, and the 401 / 403 / 404 / 422
@@ -532,7 +544,7 @@ error paths. Exit code 0 = all passed. The script grows with every service.
 ### 13.2 Manual checks (Phase 1)
 
 - [ ] `docker compose ps` – every container `healthy`
-- [ ] Login page opens: http://mohitconcert11.fyre.ibm.com:8000/auth/realms/trainme/account
+- [ ] Web app opens and signs in: https://mohitconcert11.fyre.ibm.com:8443/
 - [ ] Token for `asha@trainme.test` shows `plan: PRO` (jwt.io)
 - [ ] `/api/v1/templates?category=cricket` lists 7 templates
 - [ ] `/api/v1/templates/cricket.fast_bowler` → first activity has 17 parameters, 13 metrics
@@ -554,6 +566,9 @@ error paths. Exit code 0 = all passed. The script grows with every service.
 | Service exits with `Invalid configuration` | missing/invalid env var | the log lists every bad key; fix `.env` and restart |
 | Migration fails with `checksum mismatch` | an applied migration file was edited | never edit applied migrations; add `V<next>__...sql` |
 | Image build fails at `pnpm deploy` | registry metadata needed by pnpm 12 supply-chain check | build host needs internet access to registry.npmjs.org |
+| Keycloak says "Restart login cookie not found" | the site is opened over plain HTTP on a remote host | open the HTTPS URL (port 8443) and set `TRAINME_PUBLIC_URL` to it |
+| Keycloak says "Invalid parameter: redirect_uri" | the public URL changed after the realm was imported | `scripts/keycloak-set-public-url.sh` |
+| Kong 502 for the web app, upstream `127.0.53.53` | a service named like a public TLD (`web`) resolved via public DNS | the service is named `trainme-web`; never name containers after TLDs |
 | Web login loops back to `/login?error=login_failed` | `PUBLIC_URL` of the web container differs from the browser URL, or Valkey is down | set `TRAINME_PUBLIC_URL` to the exact URL you open; check `docker compose ps valkey` |
 | Plan still FREE after paying | the access token was issued before the payment | sign out and in again (claims are copied at login) |
 | Chart empty right after ending a session | analytics processes `record.session.completed` asynchronously | wait a few seconds; check `rpk group describe analytics-svc.rollups` for lag |
