@@ -39,6 +39,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     cache: 'no-store',
     signal: AbortSignal.timeout(8_000),
   });
+  // A rejected token (revoked, or issued for an older public URL) means signing in again, not an error page.
+  if (res.status === 401) redirect('/bff/auth/login');
   const text = await res.text();
   const body = text ? JSON.parse(text) : undefined;
   if (!res.ok) throw new ApiError(res.status, body ?? {});

@@ -203,9 +203,12 @@ services:
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_NGINX_WORKER_PROCESSES: '2'
-      # Containers come and go during restarts; do not cache "host not found" for 30 s.
+      # Containers come and go during restarts and may get a different IP; do not cache "host not found"
+      # for 30 s, and re-resolve service names every 10 s and never serve a stale IP (else 404s from another service).
       KONG_DNS_NOT_FOUND_TTL: '2'
       KONG_DNS_ERROR_TTL: '1'
+      KONG_DNS_VALID_TTL: '10'
+      KONG_DNS_STALE_TTL: '0'
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
     ports: ['${TRAINME_HTTP_PORT:-8000}:8000', '${TRAINME_HTTPS_PORT:-8443}:8443']
