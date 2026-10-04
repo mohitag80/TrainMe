@@ -82,7 +82,7 @@ After an update that changes catalog search logic, rebuild the search documents 
 
 ```bash
 docker compose exec postgres psql -U postgres -d catalog_db -c "DELETE FROM catalog_seed_run"
-docker compose restart catalog-svc && docker compose exec valkey valkey-cli INCR cat:version
+docker compose restart catalog-svc        # the import also clears the catalog cache
 ```
 
 ### 2.3 Stop / start

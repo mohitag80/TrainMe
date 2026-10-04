@@ -480,7 +480,7 @@ function Recorder({
               [...activityEntries].reverse().map((e) => (
                 <div key={e.clientEntryId} className="entry-row">
                   <div className="entry-seq">
-                    {activity.grouping ? `${e.groupNo}.${((e.seqNo - 1) % activity.grouping.size) + 1}` : `#${e.seqNo}`}
+                    {activity.grouping && e.groupNo ? `${e.groupNo}.${((e.seqNo - 1) % activity.grouping.size) + 1}` : `#${e.seqNo}`}
                   </div>
                   <div className="entry-vals">
                     <EntryChips
@@ -855,7 +855,7 @@ function SessionSummary({
             {rows.map((e) => (
               <div key={e.clientEntryId} className="entry-row">
                 <div className="entry-seq">
-                  {a.grouping ? `${e.groupNo}.${((e.seqNo - 1) % a.grouping.size) + 1}` : `#${e.seqNo}`}
+                  {a.grouping && e.groupNo ? `${e.groupNo}.${((e.seqNo - 1) % a.grouping.size) + 1}` : `#${e.seqNo}`}
                 </div>
                 <div className="entry-vals">
                   <EntryChips activity={a} values={e.values} displayUnits={tracker.displayUnits} prefs={prefs} />

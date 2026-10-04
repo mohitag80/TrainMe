@@ -15,7 +15,7 @@ import sys
 from collections import OrderedDict, Counter
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-VERSION = "phase1-2026.10"
+VERSION = "phase1-2026.10.1"
 
 # ---------------------------------------------------------------------------
 # Small builders
@@ -322,6 +322,7 @@ C("body", "Body Composition", "fitness", "AREA")
 # ---------------------------------------------------------------------------
 ACTS = OrderedDict()
 
+# grouping (e.g. Over of 6) is for match play only; practice drills number deliveries 1, 2, 3 … as bowled.
 def A(code, name, kind, mode, cats, params=(), psets=(), metrics=(), grouping=None, sports=(), roles=(), equipment=(),
       primary=(), secondary=(), mechanic=None, force=None, level="beginner", synonyms=(), desc=None):
     ACTS[code] = OrderedDict(code=code, name=name, kind=kind, recordingMode=mode, categories=list(cats),
@@ -335,7 +336,7 @@ LENGTHS = ["yorker", "full", "good", "back_of_length", "short", "bouncer", "full
 
 # ----------------------------- CRICKET: fast bowling ------------------------
 A("cricket.fast.delivery", "Fast Bowling – Delivery (ball by ball)", "DRILL", "PER_ATTEMPT",
-  ["cricket.fast_bowler"], sports=["cricket"], roles=["fast_bowler"], grouping={"label": "Over", "size": 6},
+  ["cricket.fast_bowler"], sports=["cricket"], roles=["fast_bowler"],
   equipment=["cricket_ball", "stumps", "cones", "speed_gun"], level="beginner",
   synonyms=["pace bowling", "seam bowling", "net bowling", "ball by ball"],
   params=[P("speed_kmph", "DECIMAL", "Speed", "km/h", 40, 170, 0.1, agg="AVG"),
@@ -397,7 +398,7 @@ A("cricket.bowling.workload", "Bowling Workload Check-in", "LOG", "PER_SESSION",
 
 # ----------------------------- CRICKET: spin bowling ------------------------
 A("cricket.spin.delivery", "Spin Bowling – Delivery (ball by ball)", "DRILL", "PER_ATTEMPT", ["cricket.spin_bowler"],
-  sports=["cricket"], roles=["spin_bowler"], grouping={"label": "Over", "size": 6}, equipment=["cricket_ball", "stumps", "cones"],
+  sports=["cricket"], roles=["spin_bowler"], equipment=["cricket_ball", "stumps", "cones"],
   synonyms=["off spin", "leg spin", "wrist spin", "finger spin", "googly", "doosra", "carrom ball"],
   params=[P("spin_type", "ENUM", "Spin type", options=["off_spin", "leg_spin", "left_arm_orthodox", "left_arm_wrist"]),
           P("delivery", "ENUM", "Delivery", options=["stock", "arm_ball", "top_spinner", "slider", "googly_doosra", "carrom", "flipper"], req=True),
@@ -419,7 +420,7 @@ SHOTS = ["leave", "forward_defence", "back_defence", "straight_drive", "cover_dr
          "cut", "late_cut", "pull", "hook", "flick", "glance", "sweep", "paddle_sweep", "slog_sweep", "reverse_sweep",
          "loft", "ramp_scoop", "switch_hit", "other"]
 A("cricket.bat.ball_faced", "Batting – Ball Faced (nets / throw-downs)", "DRILL", "PER_ATTEMPT", ["cricket.batter"],
-  sports=["cricket"], roles=["batter"], grouping={"label": "Over", "size": 6},
+  sports=["cricket"], roles=["batter"],
   equipment=["cricket_ball", "bowling_machine", "stumps"], synonyms=["net session", "throwdowns", "sidearm", "bowling machine"],
   params=[P("feed", "ENUM", "Feed", options=["pace", "spin", "throwdown", "sidearm", "bowling_machine"], req=True),
           P("ball_speed_kmph", "DECIMAL", "Ball speed", "km/h", 30, 160, agg="AVG"),
@@ -496,7 +497,7 @@ A("cricket.field.throw", "Throwing Accuracy Drill", "DRILL", "PER_ATTEMPT", ["cr
   synonyms=["direct hit", "throw at stumps", "arm strength"])
 
 A("cricket.keep.take", "Wicket-keeping – Take", "DRILL", "PER_ATTEMPT", ["cricket.wicket_keeper"], sports=["cricket"], roles=["wicket_keeper"],
-  equipment=["cricket_ball", "stumps"], grouping={"label": "Over", "size": 6},
+  equipment=["cricket_ball", "stumps"],
   params=[P("ball_from", "ENUM", "Ball from", options=["pace", "spin", "throw", "machine"], req=True),
           P("stance", "ENUM", "Position", options=["standing_back", "standing_up"], req=True),
           P("side", "ENUM", "Side", options=["off", "leg", "straight"]), P("height", "ENUM", "Height", options=["low", "waist", "chest", "high"]),

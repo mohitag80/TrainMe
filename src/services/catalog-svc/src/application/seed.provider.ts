@@ -27,6 +27,6 @@ export class SeedOnStart implements OnApplicationBootstrap {
     if (!this.config.SEED_CATALOG_ON_START) return;
     const raw = await readFile(this.config.SEED_FILE ?? defaultSeedFile(), 'utf8');
     const result = await new CatalogSeeder(this.db, this.outbox, this.log).seed(raw);
-    if (!result.skipped) await this.admin.invalidate();
+    if (!result.skipped) await this.admin.invalidateAll();
   }
 }

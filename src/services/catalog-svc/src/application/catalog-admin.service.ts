@@ -92,4 +92,21 @@ export class CatalogAdminService {
       // Cache is optional; stale entries expire by TTL.
     }
   }
+
+  /** After a seed import: "latest" template/activity keys are not versioned, so drop them all, then bump the version. */
+  async invalidateAll(): Promise<void> {
+    try {
+      for (const pattern of ['cat:tpl:*:latest', 'cat:act:*:latest']) {
+        let cursor = '0';
+        do {
+          const [next, keys] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 500);
+          if (keys.length) await this.redis.del(...keys);
+          cursor = next;
+        } while (cursor !== '0');
+      }
+    } catch {
+      // Cache is optional; stale entries expire by TTL.
+    }
+    await this.invalidate();
+  }
 }

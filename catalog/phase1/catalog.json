@@ -1,5 +1,5 @@
 {
-  "version": "phase1-2026.10",
+  "version": "phase1-2026.10.1",
   "generatedBy": "catalog/tools/build_phase1_catalog.py",
   "sources": [
     {
@@ -2546,10 +2546,7 @@
           }
         }
       ],
-      "grouping": {
-        "label": "Over",
-        "size": 6
-      },
+      "grouping": null,
       "equipment": [
         "cricket_ball",
         "stumps",
@@ -3374,10 +3371,7 @@
           }
         }
       ],
-      "grouping": {
-        "label": "Over",
-        "size": 6
-      },
+      "grouping": null,
       "equipment": [
         "cricket_ball",
         "stumps",
@@ -3745,10 +3739,7 @@
           }
         }
       ],
-      "grouping": {
-        "label": "Over",
-        "size": 6
-      },
+      "grouping": null,
       "equipment": [
         "cricket_ball",
         "bowling_machine",
@@ -4836,10 +4827,7 @@
           }
         }
       ],
-      "grouping": {
-        "label": "Over",
-        "size": 6
-      },
+      "grouping": null,
       "equipment": [
         "cricket_ball",
         "stumps"
