@@ -1,47 +1,87 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ErrorBanner, Notice, Spinner } from '@/components/client-ui';
+import { Segmented } from '@/components/controls';
 import { Card, PageHeader } from '@/components/ui';
 import { api, errorText } from '@/lib/client/api';
+import { units } from '@/lib/client/format';
 import { useData } from '@/lib/client/use-data';
 import type { Profile } from '@/lib/types';
 
+type System = 'METRIC' | 'IMPERIAL';
 const DIMENSIONS: { key: string; label: string; metric: string; imperial: string }[] = [
   { key: 'speed', label: 'Speed', metric: 'km/h', imperial: 'mph' },
-  { key: 'mass', label: 'Weight', metric: 'kg, g', imperial: 'lb, oz' },
-  { key: 'length', label: 'Distance / length', metric: 'km, m, cm', imperial: 'mi, yd, in' },
-  { key: 'volume', label: 'Volume', metric: 'ml, l', imperial: 'fl oz, qt' },
-  { key: 'pace', label: 'Pace', metric: 'min/km', imperial: 'min/mi' },
+  { key: 'mass', label: 'Weight', metric: 'kg · g', imperial: 'lb · oz' },
+  { key: 'length', label: 'Distance & height', metric: 'km · m · cm', imperial: 'mi · yd · in' },
+  { key: 'volume', label: 'Volume', metric: 'ml · l', imperial: 'fl oz · qt' },
+  { key: 'pace', label: 'Running pace', metric: 'min/km', imperial: 'min/mi' },
+];
+const COMMON_ZONES = [
+  'Asia/Kolkata',
+  'Asia/Dubai',
+  'Asia/Singapore',
+  'Australia/Sydney',
+  'Europe/London',
+  'Europe/Berlin',
+  'America/New_York',
+  'America/Chicago',
+  'America/Los_Angeles',
+  'UTC',
 ];
 
-/** FR-PRF-01/06: profile and Metric/Imperial per dimension; stored measurements are never converted. */
+/** FR-PRF-01/06: about you and units – plain choices; stored measurements are never converted. */
 export default function ProfilePage() {
   const profile = useData<Profile>('/profiles/me');
   const [form, setForm] = useState<Partial<Profile>>({});
+  const [height, setHeight] = useState('');
+  const [weight, setWeight] = useState('');
   const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string }>();
+  const browserZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC';
+  const prefs = (form.unitPreferences ?? {}) as Record<string, System>;
+  const imperialLength = prefs.length === 'IMPERIAL';
+  const imperialMass = prefs.mass === 'IMPERIAL';
+
   useEffect(() => {
-    if (profile.data) setForm(profile.data);
+    if (!profile.data) return;
+    setForm(profile.data);
+    const p = profile.data.unitPreferences as Record<string, System>;
+    setHeight(
+      profile.data.heightCm
+        ? String(p.length === 'IMPERIAL' ? units.toDisplay(profile.data.heightCm, 'cm', 'in') : profile.data.heightCm)
+        : '',
+    );
+    setWeight(
+      profile.data.weightKg
+        ? String(p.mass === 'IMPERIAL' ? units.toDisplay(profile.data.weightKg, 'kg', 'lb') : profile.data.weightKg)
+        : '',
+    );
   }, [profile.data]);
+  const zones = useMemo(
+    () => [...new Set([browserZone, ...(form.timezone ? [form.timezone] : []), ...COMMON_ZONES])],
+    [browserZone, form.timezone],
+  );
+
   if (profile.error) return <ErrorBanner error={profile.error} />;
   if (!profile.data) return <Spinner />;
-  const prefs = form.unitPreferences ?? {};
 
   async function save(extra: Record<string, unknown> = {}) {
     try {
+      const h = height ? Number(height) : null;
+      const w = weight ? Number(weight) : null;
       const updated = await api<Profile>('/profiles/me', {
         method: 'PUT',
         headers: { 'if-match': `"${profile.data!.rowVersion}"` },
         body: {
           displayName: form.displayName,
           timezone: form.timezone,
-          heightCm: form.heightCm ?? null,
-          weightKg: form.weightKg ?? null,
+          heightCm: h === null ? null : imperialLength ? Math.round(units.toCanonical(h, 'in', 'cm') * 10) / 10 : h,
+          weightKg: w === null ? null : imperialMass ? Math.round(units.toCanonical(w, 'lb', 'kg') * 10) / 10 : w,
           unitPreferences: prefs,
           ...extra,
         },
       });
       profile.setData(updated);
-      setMsg({ tone: 'ok', text: 'Saved. Charts and forms now use these units.' });
+      setMsg({ tone: 'ok', text: 'Saved. Forms and charts now use these settings.' });
     } catch (e) {
       setMsg({ tone: 'bad', text: errorText(e) });
     }
@@ -51,88 +91,103 @@ export default function ProfilePage() {
     <div className="stack">
       <PageHeader title="Profile" subtitle={profile.data.email ?? ''} />
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
-      <Card title="About you">
-        <div className="form-grid">
-          <label className="field">
-            Display name
-            <input value={form.displayName ?? ''} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
-          </label>
-          <label className="field">
-            Time zone
-            <input value={form.timezone ?? ''} onChange={(e) => setForm({ ...form, timezone: e.target.value })} />
-            <span className="field-hint">Your browser: {Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
-          </label>
-          <label className="field">
-            Height (cm)
-            <input
-              type="number"
-              value={form.heightCm ?? ''}
-              onChange={(e) => setForm({ ...form, heightCm: e.target.value ? Number(e.target.value) : null })}
-            />
-          </label>
-          <label className="field">
-            Weight (kg)
-            <input
-              type="number"
-              value={form.weightKg ?? ''}
-              onChange={(e) => setForm({ ...form, weightKg: e.target.value ? Number(e.target.value) : null })}
-            />
-          </label>
-        </div>
-      </Card>
-      <Card
-        title="Units"
-        actions={
-          <>
-            <button className="btn btn-sm" onClick={() => save({ unitPreset: 'METRIC', unitPreferences: {} })}>
-              All metric
-            </button>
-            <button className="btn btn-sm" onClick={() => save({ unitPreset: 'IMPERIAL', unitPreferences: {} })}>
-              All imperial
-            </button>
-          </>
-        }
-      >
-        <p className="small muted" style={{ marginBottom: 10 }}>
-          Choose per measurement. A tracker can still show a specific parameter in another unit (e.g. grams or stone).
-        </p>
-        <table>
-          <tbody>
+      <div className="grid-2">
+        <Card title="About you">
+          <div className="form-grid">
+            <label className="field">
+              Name
+              <input
+                value={form.displayName ?? ''}
+                onChange={(e) => setForm({ ...form, displayName: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              Time zone
+              <select value={form.timezone ?? 'UTC'} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
+                {zones.map((z) => (
+                  <option key={z} value={z}>
+                    {z.replaceAll('_', ' ')}
+                    {z === browserZone ? ' (this device)' : ''}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">Decides which day a session belongs to</span>
+            </label>
+            <label className="field">
+              Height
+              <div className="input-unit">
+                <input type="number" inputMode="decimal" value={height} onChange={(e) => setHeight(e.target.value)} />
+                <span className="unit">{imperialLength ? 'in' : 'cm'}</span>
+              </div>
+            </label>
+            <label className="field">
+              Body weight
+              <div className="input-unit">
+                <input type="number" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} />
+                <span className="unit">{imperialMass ? 'lb' : 'kg'}</span>
+              </div>
+            </label>
+          </div>
+        </Card>
+
+        <Card
+          title="Units"
+          actions={
+            <>
+              <button
+                className="btn btn-sm"
+                onClick={() =>
+                  setForm({ ...form, unitPreferences: Object.fromEntries(DIMENSIONS.map((d) => [d.key, 'METRIC'])) })
+                }
+              >
+                All metric
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={() =>
+                  setForm({ ...form, unitPreferences: Object.fromEntries(DIMENSIONS.map((d) => [d.key, 'IMPERIAL'])) })
+                }
+              >
+                All imperial
+              </button>
+            </>
+          }
+        >
+          <dl className="kv">
             {DIMENSIONS.map((d) => (
-              <tr key={d.key}>
-                <td>
-                  <strong>{d.label}</strong>
-                </td>
-                <td>
-                  <div className="chips">
-                    {(['METRIC', 'IMPERIAL'] as const).map((sys) => (
-                      <button
-                        key={sys}
-                        className={`chip ${(prefs[d.key] ?? 'METRIC') === sys ? 'on' : ''}`}
-                        onClick={() => setForm({ ...form, unitPreferences: { ...prefs, [d.key]: sys } })}
-                      >
-                        {sys === 'METRIC' ? `Metric (${d.metric})` : `Imperial (${d.imperial})`}
-                      </button>
-                    ))}
-                  </div>
-                </td>
-              </tr>
+              <div key={d.key} style={{ display: 'contents' }}>
+                <dt>{d.label}</dt>
+                <dd>
+                  <Segmented
+                    size="sm"
+                    value={prefs[d.key] ?? 'METRIC'}
+                    onChange={(v) => setForm({ ...form, unitPreferences: { ...prefs, [d.key]: v ?? 'METRIC' } })}
+                    options={[
+                      { value: 'METRIC' as System, label: `Metric · ${d.metric}` },
+                      { value: 'IMPERIAL' as System, label: `Imperial · ${d.imperial}` },
+                    ]}
+                  />
+                </dd>
+              </div>
             ))}
-          </tbody>
-        </table>
-      </Card>
+          </dl>
+          <p className="small muted" style={{ marginTop: 14 }}>
+            A tracker can still show one field in another unit – e.g. bat weight in grams or bowling speed in m/s.
+          </p>
+        </Card>
+      </div>
       <div className="row gap">
-        <button className="btn btn-primary" onClick={() => save()}>
-          Save profile
+        <button className="btn btn-primary btn-lg" onClick={() => save()}>
+          Save changes
         </button>
         <button
-          className="btn"
+          className="btn btn-ghost"
           onClick={async () => {
             await api('/profiles/me/export', { method: 'POST' });
-            setMsg({ tone: 'ok', text: 'Export requested – you will get a download link (≤ 24 h).' });
+            setMsg({ tone: 'ok', text: 'Export requested – you will get a download link within 24 hours.' });
           }}
         >
-          Request data export
+          Download my data
         </button>
       </div>
     </div>

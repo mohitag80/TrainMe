@@ -23,8 +23,8 @@ export function StartTracker({ templateCode, name }: { templateCode: string; nam
   }
   return (
     <div className="row gap">
-      {error && <span className="field-error">{error}</span>}
-      <button className="btn btn-primary" onClick={start} disabled={busy}>
+      {error && <span className="hero-error">{error}</span>}
+      <button className="btn btn-light btn-lg" onClick={start} disabled={busy}>
         {busy ? 'Creating…' : 'Start tracking'}
       </button>
     </div>

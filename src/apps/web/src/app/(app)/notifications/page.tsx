@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { ErrorBanner, Notice, Spinner } from '@/components/client-ui';
 import { Badge, Card, Empty, PageHeader } from '@/components/ui';
 import { api, errorText } from '@/lib/client/api';
-import { timeZone } from '@/lib/client/format';
+import { friendlyTime, timeZone } from '@/lib/client/format';
 import { useData } from '@/lib/client/use-data';
 import type { TrackerSummary } from '@/lib/types';
 
@@ -77,7 +77,7 @@ export default function NotificationsPage() {
                   <div className="small muted">{n.body}</div>
                 </div>
                 <div className="row gap">
-                  <span className="small muted">{new Date(n.createdAt).toLocaleString()}</span>
+                  <span className="small muted">{friendlyTime(n.createdAt)}</span>
                   {!n.readAt && (
                     <button
                       className="btn btn-sm"
@@ -107,7 +107,7 @@ export default function NotificationsPage() {
                     <strong>{r.title}</strong> <Badge>{r.channel.toLowerCase()}</Badge>
                     <div className="small muted">
                       {r.daysOfWeek.map((d) => DAYS[d - 1]).join(', ')} at {r.timeOfDay.slice(0, 5)} · next{' '}
-                      {new Date(r.nextFireAt).toLocaleString()}
+                      {friendlyTime(r.nextFireAt)}
                     </div>
                   </div>
                   <button

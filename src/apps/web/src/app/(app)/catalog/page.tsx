@@ -109,7 +109,7 @@ export default function CatalogPage() {
         </Card>
       )}
 
-      <div id="browse" className="row gap wrap">
+      <div id="browse" className="chip-row">
         {top.map((c) => (
           <button
             key={c.code}
@@ -121,7 +121,7 @@ export default function CatalogPage() {
         ))}
       </div>
       {children.length > 0 && (
-        <div className="row gap wrap">
+        <div className="chip-row sub">
           {children.map((c) => (
             <button key={c.code} className="chip" onClick={() => setCategory(c.code)}>
               {c.name}

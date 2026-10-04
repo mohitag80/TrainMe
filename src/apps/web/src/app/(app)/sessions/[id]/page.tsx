@@ -5,9 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EntryValidator, evaluateMetric, type EffectiveActivity, type EffectiveParameter } from '@trainme/schema';
 import type { UnitPreferences } from '@trainme/units';
 import { ErrorBanner, Notice, Spinner } from '@/components/client-ui';
+import { Segmented, Switch } from '@/components/controls';
 import { Badge, Card, Empty, PageHeader } from '@/components/ui';
 import { api, ApiError, errorText } from '@/lib/client/api';
 import { displayUnitFor, formatMetric, units } from '@/lib/client/format';
+import { groupParameters, humanize } from '@/lib/labels';
 import type { Profile, Session, SessionEntry, TrackerDetail, TrackerSchema } from '@/lib/types';
 
 /** Checkpoint interval. The design allows 3–5 min (FR-REC-10); 60 s keeps the demo responsive. */
@@ -40,6 +42,22 @@ const toWire = (e: LocalEntry) => ({
   rowVersion: e.rowVersion,
 });
 
+/** Switches start off: skill "attempted" flags and stand-alone yes/no fields are false until turned on. */
+function switchDefaults(a: EffectiveActivity): Record<string, unknown> {
+  return Object.fromEntries(
+    groupParameters(a.parameters).flatMap((r) =>
+      r.kind === 'skill'
+        ? [[r.attempted.key, false]]
+        : r.param.type === 'BOOL' && !r.param.condition
+          ? [[r.param.key, false]]
+          : [],
+    ),
+  );
+}
+
+const entryLabel = (a: EffectiveActivity) =>
+  a.recordingMode === 'PER_SET' ? 'set' : a.recordingMode === 'PER_ATTEMPT' ? 'ball' : 'result';
+
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const [session, setSession] = useState<Session>();
@@ -60,7 +78,7 @@ export default function SessionPage() {
       const local = loadLocal(id);
       const server: LocalEntry[] = s.entries.map((e) => ({ ...e, synced: true }));
       const pending = (local?.pending ?? []).filter(
-        (p) => !server.some((x) => x.clientEntryId === p.clientEntryId && x.rowVersion >= p.rowVersion),
+        (x) => !server.some((y) => y.clientEntryId === x.clientEntryId && y.rowVersion >= x.rowVersion),
       );
       const deleted = new Set(local?.deletes ?? []);
       setEntries([...server.filter((e) => !deleted.has(e.clientEntryId)), ...pending]);
@@ -130,7 +148,9 @@ function Recorder({
   const validator = useMemo(() => new EntryValidator(schema), [schema]);
   const [activityCode, setActivityCode] = useState(activities[0]?.code ?? '');
   const activity = activities.find((a) => a.code === activityCode)!;
-  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [values, setValues] = useState<Record<string, unknown>>(() =>
+    activities[0] ? switchDefaults(activities[0]) : {},
+  );
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'error'>('idle');
   const [syncError, setSyncError] = useState<string>();
@@ -235,9 +255,6 @@ function Recorder({
     return () => clearInterval(t);
   }, [session.startedAt]);
 
-  const visibleParams = activity.parameters.filter(
-    (p) => !p.hidden && (!p.condition || values[p.condition.when.key] === p.condition.when.eq),
-  );
   const activityEntries = entries.filter((e) => e.activityCode === activity.code);
 
   /** Validates with the shared schema validator, converts display units to canonical and stores locally. */
@@ -257,7 +274,7 @@ function Recorder({
       if (p.type === 'INT' || p.type === 'DECIMAL' || p.type === 'DURATION') {
         const n = Number(v);
         if (!Number.isFinite(n)) {
-          errs[p.key] = 'must be a number';
+          errs[p.key] = 'Enter a number';
           continue;
         }
         const shown = displayUnitFor(p, activity.code, tracker.displayUnits, prefs);
@@ -269,7 +286,15 @@ function Recorder({
               : n;
       } else canonical[p.key] = v;
     }
-    for (const i of validator.validate(activity.code, canonical)) errs[i.pointer.replace('/values/', '')] = i.message;
+    for (const i of validator.validate(activity.code, canonical)) {
+      const key = i.pointer.replace('/values/', '');
+      errs[key] =
+        i.code === 'required'
+          ? 'Required'
+          : i.code === 'minimum' || i.code === 'maximum'
+            ? 'Outside the allowed range'
+            : i.message;
+    }
     setFormErrors(errs);
     if (Object.keys(errs).length) return;
     const seq = activityEntries.reduce((m, e) => Math.max(m, e.seqNo), 0) + 1;
@@ -288,12 +313,13 @@ function Recorder({
       persist(next);
       return next;
     });
-    // Keep numbers (similar balls), reset yes/no choices for the next entry.
-    setValues((v) =>
-      Object.fromEntries(
+    // Keep numbers and choices (similar balls); switches go back to off, results are cleared.
+    setValues((v) => ({
+      ...Object.fromEntries(
         Object.entries(v).filter(([k]) => activity.parameters.find((p) => p.key === k)?.type !== 'BOOL'),
       ),
-    );
+      ...switchDefaults(activity),
+    }));
   }
 
   function removeEntry(e: LocalEntry) {
@@ -340,35 +366,41 @@ function Recorder({
   const unsynced = entries.filter((e) => !e.synced).length;
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const ss = String(elapsed % 60).padStart(2, '0');
-  const label =
-    activity.recordingMode === 'PER_SET' ? 'set' : activity.recordingMode === 'PER_ATTEMPT' ? 'entry' : 'result';
+  const label = entryLabel(activity);
+  const position = activity.grouping
+    ? `${activity.grouping.label} ${Math.floor(activityEntries.length / activity.grouping.size) + 1} · ${label} ${(activityEntries.length % activity.grouping.size) + 1}`
+    : `${humanize(label)} ${activityEntries.length + 1}`;
 
   return (
     <div className="stack">
+      <nav className="crumbs">
+        <Link href={`/trackers/${tracker.id}`}>{tracker.displayName}</Link> <span>›</span> {session.name}
+      </nav>
       <PageHeader
         title={session.name}
         subtitle={
           <>
-            {tracker.displayName} · {session.sessionDate} ·{' '}
-            <span className="mono">
+            Live ·{' '}
+            <span className="timer">
               {mm}:{ss}
+            </span>{' '}
+            ·{' '}
+            <span className="row gap" style={{ display: 'inline-flex' }}>
+              <span className={`sync-dot ${syncState === 'error' ? 'bad' : unsynced ? 'pending' : 'ok'}`} />
+              {syncState === 'syncing'
+                ? 'Saving…'
+                : unsynced
+                  ? `${unsynced} not saved yet`
+                  : lastSync
+                    ? `Saved at ${lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                    : 'All saved'}
             </span>
           </>
         }
         actions={
           <>
-            <span className="small muted row gap">
-              <span className={`sync-dot ${syncState === 'error' ? 'bad' : unsynced ? 'pending' : 'ok'}`} />
-              {syncState === 'syncing'
-                ? 'Syncing…'
-                : unsynced
-                  ? `${unsynced} not synced`
-                  : lastSync
-                    ? `Synced ${lastSync.toLocaleTimeString()}`
-                    : 'All synced'}
-            </span>
-            <button className="btn" onClick={() => void flush()}>
-              Sync now
+            <button className="btn btn-ghost" onClick={() => void flush()}>
+              Save now
             </button>
             {entries.length === 0 && (
               <button
@@ -382,7 +414,7 @@ function Recorder({
               </button>
             )}
             <button className="btn btn-primary" onClick={end} disabled={ending}>
-              {ending ? 'Ending…' : '■ End session'}
+              {ending ? 'Finishing…' : '■ End session'}
             </button>
           </>
         }
@@ -390,18 +422,18 @@ function Recorder({
       {syncError && <Notice tone="bad">{syncError}</Notice>}
       <div className="recorder">
         <Card
-          title="Log"
-          actions={
-            activities.length > 1 && (
+          title={
+            activities.length > 1 ? (
               <select
+                className="title-select"
                 value={activityCode}
                 onChange={(e) => {
                   setActivityCode(e.target.value);
-                  setValues({});
+                  const next = activities.find((x) => x.code === e.target.value);
+                  setValues(next ? switchDefaults(next) : {});
                   setFormErrors({});
                 }}
                 aria-label="Activity"
-                style={{ width: 240 }}
               >
                 {activities.map((a) => (
                   <option key={a.code} value={a.code}>
@@ -409,33 +441,31 @@ function Recorder({
                   </option>
                 ))}
               </select>
+            ) : (
+              activity.name
             )
           }
+          actions={<Badge tone="brand">{position}</Badge>}
         >
-          <p className="small muted" style={{ marginBottom: 12 }}>
-            {activity.name} ·{' '}
-            {activity.grouping
-              ? `${activity.grouping.label} ${Math.floor(activityEntries.length / activity.grouping.size) + 1}, ${label} ${(activityEntries.length % activity.grouping.size) + 1}`
-              : `${label} ${activityEntries.length + 1}`}
-          </p>
-          <div className="stack" style={{ gap: 14 }}>
-            {visibleParams.map((p) => (
-              <ParamInput
-                key={p.key}
-                p={p}
-                unit={displayUnitFor(p, activity.code, tracker.displayUnits, prefs)}
-                value={values[p.key]}
-                error={formErrors[p.key]}
-                onChange={(v) => setValues((cur) => ({ ...cur, [p.key]: v }))}
-              />
-            ))}
-          </div>
-          <div className="row gap" style={{ marginTop: 16 }}>
+          <EntryForm
+            activity={activity}
+            values={values}
+            errors={formErrors}
+            unitFor={(p) => displayUnitFor(p, activity.code, tracker.displayUnits, prefs)}
+            onChange={(key, v) =>
+              setValues((cur) => {
+                const next = { ...cur, [key]: v };
+                if (v === undefined) delete next[key];
+                return next;
+              })
+            }
+          />
+          <div className="log-bar">
             <button className="btn btn-primary btn-lg" onClick={() => logEntry()}>
               + Log {label}
             </button>
             {activityEntries.length > 0 && (
-              <button className="btn" onClick={() => logEntry(activityEntries.at(-1)!.values)}>
+              <button className="btn btn-lg" onClick={() => logEntry(activityEntries.at(-1)!.values)}>
                 Repeat last
               </button>
             )}
@@ -443,7 +473,7 @@ function Recorder({
         </Card>
         <div className="stack">
           <LiveStats activity={activity} entries={activityEntries} prefs={prefs} />
-          <Card title={`Entries (${activityEntries.length})`}>
+          <Card title={`Logged (${activityEntries.length})`}>
             {activityEntries.length === 0 ? (
               <Empty>Nothing logged yet.</Empty>
             ) : (
@@ -453,15 +483,20 @@ function Recorder({
                     {activity.grouping ? `${e.groupNo}.${((e.seqNo - 1) % activity.grouping.size) + 1}` : `#${e.seqNo}`}
                   </div>
                   <div className="entry-vals">
-                    {formatValues(activity, e.values, tracker.displayUnits, prefs)}
+                    <EntryChips
+                      activity={activity}
+                      values={e.values}
+                      displayUnits={tracker.displayUnits}
+                      prefs={prefs}
+                    />
                     {e.errors && <div className="field-error">{e.errors.join('; ')}</div>}
                   </div>
                   <div className="row gap">
                     <span
                       className={`sync-dot ${e.errors ? 'bad' : e.synced ? 'ok' : 'pending'}`}
-                      title={e.synced ? 'synced' : 'not synced yet'}
+                      title={e.synced ? 'saved' : 'not saved yet'}
                     />
-                    <button className="btn btn-sm" onClick={() => removeEntry(e)} aria-label="Delete entry">
+                    <button className="btn btn-sm btn-ghost" onClick={() => removeEntry(e)} aria-label="Delete entry">
                       ✕
                     </button>
                   </div>
@@ -475,7 +510,122 @@ function Recorder({
   );
 }
 
-function ParamInput({
+/** The entry form in plain sections: measurements, choices, skills (switch → result) and other switches. */
+function EntryForm({
+  activity,
+  values,
+  errors,
+  unitFor,
+  onChange,
+}: {
+  activity: EffectiveActivity;
+  values: Record<string, unknown>;
+  errors: Record<string, string>;
+  unitFor: (p: EffectiveParameter) => string | undefined;
+  onChange: (key: string, v: unknown) => void;
+}) {
+  const rows = groupParameters(activity.parameters).filter(
+    (r) => r.kind === 'skill' || !r.param.condition || values[r.param.condition.when.key] === r.param.condition.when.eq,
+  );
+  const numbers = rows.flatMap((r) =>
+    r.kind === 'single' && r.param.type !== 'BOOL' && r.param.type !== 'ENUM' ? [r.param] : [],
+  );
+  const choices = rows.flatMap((r) => (r.kind === 'single' && r.param.type === 'ENUM' ? [r.param] : []));
+  const skills = rows.flatMap((r) => (r.kind === 'skill' ? [r] : []));
+  const toggles = rows.flatMap((r) => (r.kind === 'single' && r.param.type === 'BOOL' ? [r.param] : []));
+  return (
+    <div className="stack" style={{ gap: 18 }}>
+      {numbers.length > 0 && (
+        <div className="form-section">
+          <div className="section-title">Measurements</div>
+          <div className="form-grid">
+            {numbers.map((p) => (
+              <NumberInput
+                key={p.key}
+                p={p}
+                unit={unitFor(p)}
+                value={values[p.key]}
+                error={errors[p.key]}
+                onChange={(v) => onChange(p.key, v)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {choices.length > 0 && (
+        <div className="form-section">
+          <div className="section-title">Choices</div>
+          {choices.map((p) => (
+            <div key={p.key} className="field">
+              <span>{p.label}</span>
+              <Segmented
+                size="sm"
+                value={values[p.key] as string | undefined}
+                onChange={(v) => onChange(p.key, v)}
+                options={(p.constraints.options ?? []).map((o) => ({ value: o, label: humanize(o) }))}
+              />
+              {errors[p.key] && <span className="field-error">{errors[p.key]}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {skills.length > 0 && (
+        <div className="form-section">
+          <div className="section-title">
+            Skills tried on this {entryLabel(activity)} – switch on only what you attempted
+          </div>
+          <div className="skills-grid">
+            {skills.map((r) => {
+              const on = values[r.attempted.key] === true;
+              return (
+                <div key={r.attempted.key} className={`skill ${on ? 'on' : ''}`}>
+                  <Switch
+                    checked={on}
+                    label={r.name}
+                    hint={on ? 'How did it go?' : 'Not attempted'}
+                    onChange={(v) => {
+                      onChange(r.attempted.key, v);
+                      if (!v) onChange(r.result.key, undefined);
+                    }}
+                  />
+                  {on && (
+                    <div className="skill-result">
+                      <Segmented
+                        size="sm"
+                        value={values[r.result.key] as boolean | undefined}
+                        onChange={(v) => onChange(r.result.key, v)}
+                        options={[
+                          { value: true, label: 'Accurate', tone: 'ok' },
+                          { value: false, label: 'Missed', tone: 'bad' },
+                        ]}
+                      />
+                      {errors[r.result.key] && <span className="field-error">Mark Accurate or Missed</span>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {toggles.length > 0 && (
+        <div className="form-section">
+          <div className="section-title">Other</div>
+          <div className="skills-grid">
+            {toggles.map((p) => (
+              <div key={p.key} className={`skill ${values[p.key] === true ? 'on' : ''}`}>
+                <Switch checked={values[p.key] === true} label={p.label} onChange={(v) => onChange(p.key, v)} />
+                {errors[p.key] && <span className="field-error">{errors[p.key]}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NumberInput({
   p,
   unit,
   value,
@@ -488,49 +638,6 @@ function ParamInput({
   error?: string;
   onChange: (v: unknown) => void;
 }) {
-  const label = (
-    <>
-      {p.label}
-      {p.required ? ' *' : ''}
-      {unit ? <span className="field-hint"> ({unit})</span> : null}
-    </>
-  );
-  if (p.type === 'BOOL') {
-    return (
-      <div className="field">
-        <span>{label}</span>
-        <div className="chips">
-          <button type="button" className={`chip yes ${value === true ? 'on' : ''}`} onClick={() => onChange(true)}>
-            Yes
-          </button>
-          <button type="button" className={`chip no ${value === false ? 'on' : ''}`} onClick={() => onChange(false)}>
-            No
-          </button>
-        </div>
-        {error && <span className="field-error">{error}</span>}
-      </div>
-    );
-  }
-  if (p.type === 'ENUM') {
-    return (
-      <div className="field">
-        <span>{label}</span>
-        <div className="chips">
-          {(p.constraints.options ?? []).map((o) => (
-            <button
-              type="button"
-              key={o}
-              className={`chip ${value === o ? 'on' : ''}`}
-              onClick={() => onChange(value === o ? undefined : o)}
-            >
-              {o.replaceAll('_', ' ')}
-            </button>
-          ))}
-        </div>
-        {error && <span className="field-error">{error}</span>}
-      </div>
-    );
-  }
   const numeric = p.type !== 'TEXT';
   const range =
     numeric && p.unit && unit
@@ -538,24 +645,26 @@ function ParamInput({
       : { min: p.constraints.min, max: p.constraints.max };
   const step =
     unit && unit !== p.unit ? (units.get(unit)?.step ?? 'any') : (p.constraints.step ?? (p.type === 'INT' ? 1 : 'any'));
+  const shownUnit = unit ?? p.unit;
   return (
     <label className="field">
-      {label}
-      <input
-        type={numeric ? 'number' : 'text'}
-        inputMode={numeric ? 'decimal' : undefined}
-        step={numeric ? step : undefined}
-        min={range.min}
-        max={range.max}
-        value={(value as string | number | undefined) ?? ''}
-        onChange={(e) => onChange(e.target.value)}
-        style={{ maxWidth: 220 }}
-      />
-      {numeric && (range.min !== undefined || range.max !== undefined) && (
-        <span className="field-hint">
-          {range.min ?? '…'} – {range.max ?? '…'}
-        </span>
-      )}
+      <span>
+        {p.label}
+        {!p.required && <span className="field-hint"> · optional</span>}
+      </span>
+      <div className="input-unit">
+        <input
+          type={numeric ? 'number' : 'text'}
+          inputMode={numeric ? 'decimal' : undefined}
+          step={numeric ? step : undefined}
+          min={range.min}
+          max={range.max}
+          placeholder={numeric && range.min !== undefined && range.max !== undefined ? `${range.min}–${range.max}` : ''}
+          value={(value as string | number | undefined) ?? ''}
+          onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)}
+        />
+        {shownUnit && <span className="unit">{shownUnit}</span>}
+      </div>
       {error && <span className="field-error">{error}</span>}
     </label>
   );
@@ -570,54 +679,79 @@ function LiveStats({
   entries: LocalEntry[];
   prefs: UnitPreferences;
 }) {
-  const metrics = activity.metrics.filter((m) => !m.hidden).slice(0, 8);
   const rows = entries.map((e) => ({ values: e.values }));
+  const metrics = activity.metrics
+    .filter((m) => !m.hidden)
+    .map((m) => ({ m, r: evaluateMetric(m, rows) }))
+    // Ratios with no attempts yet ("0 of 0") are noise; show them once something was tried.
+    .filter(({ m, r }) => m.kind !== 'RATIO' || (r.den ?? 0) > 0)
+    .slice(0, 8);
   return (
     <Card title="Live stats">
-      {entries.length === 0 ? (
-        <p className="small muted">Stats update after each entry – computed on this device, also offline.</p>
+      {entries.length === 0 || metrics.length === 0 ? (
+        <p className="small muted">Stats appear after the first entries – worked out on this device, even offline.</p>
       ) : (
         <div className="stats">
-          {metrics.map((m) => {
-            const r = evaluateMetric(m, rows);
-            return (
-              <div className="stat" key={m.key}>
-                <div className="stat-label">{m.label}</div>
-                <div className="stat-value" style={{ fontSize: 18 }}>
-                  {formatMetric(m, r.value, prefs)}
-                </div>
-                {m.kind === 'RATIO' && r.den !== null && (
-                  <div className="stat-hint">
-                    {r.num} of {r.den}
-                  </div>
-                )}
+          {metrics.map(({ m, r }) => (
+            <div className="stat" key={m.key}>
+              <div className="stat-label">{m.label}</div>
+              <div className="stat-value" style={{ fontSize: 20 }}>
+                {formatMetric(m, r.value, prefs)}
               </div>
-            );
-          })}
+              {m.kind === 'RATIO' && r.den !== null && (
+                <div className="stat-hint">
+                  {r.num} of {r.den}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </Card>
   );
 }
 
-function formatValues(
-  activity: EffectiveActivity,
-  values: Record<string, unknown>,
-  displayUnits: Record<string, string>,
-  prefs: UnitPreferences,
-): string {
-  return activity.parameters
-    .filter((p) => values[p.key] !== undefined)
-    .map((p) => {
-      const v = values[p.key];
-      if (typeof v === 'boolean') return `${p.label} ${v ? '✓' : '✗'}`;
-      if (typeof v === 'number' && p.unit) {
-        const shown = displayUnitFor(p, activity.code, displayUnits, prefs) ?? p.unit;
-        return `${units.toDisplay(v, p.unit, shown)} ${shown}`;
+/** One entry as readable chips: "131.4 km/h", "Off stump", "Yorker ✓", "No-ball". */
+function EntryChips({
+  activity,
+  values,
+  displayUnits,
+  prefs,
+}: {
+  activity: EffectiveActivity;
+  values: Record<string, unknown>;
+  displayUnits: Record<string, string>;
+  prefs: UnitPreferences;
+}) {
+  const chips: { text: string; tone?: 'ok' | 'bad' | 'strong' }[] = [];
+  for (const r of groupParameters(activity.parameters.map((p) => ({ ...p, hidden: false })))) {
+    if (r.kind === 'skill') {
+      if (values[r.attempted.key] === true) {
+        const hit = values[r.result.key] === true;
+        chips.push({ text: `${r.name} ${hit ? '✓' : '✗'}`, tone: hit ? 'ok' : 'bad' });
       }
-      return `${p.label}: ${String(v).replaceAll('_', ' ')}`;
-    })
-    .join(' · ');
+      continue;
+    }
+    const p = r.param;
+    const v = values[p.key];
+    if (v === undefined || v === null || v === false) continue;
+    if (v === true) chips.push({ text: p.label });
+    else if (typeof v === 'number' && p.unit) {
+      const shown = displayUnitFor(p, activity.code, displayUnits, prefs) ?? p.unit;
+      chips.push({ text: `${units.toDisplay(v, p.unit, shown)} ${shown}`, tone: 'strong' });
+    } else if (typeof v === 'number') chips.push({ text: `${p.label} ${v}`, tone: 'strong' });
+    else chips.push({ text: p.type === 'ENUM' ? humanize(String(v)) : `${p.label}: ${String(v)}` });
+  }
+  if (chips.length === 0) return <span className="muted small">–</span>;
+  return (
+    <>
+      {chips.map((c, i) => (
+        <span key={i} className={`chip-val ${c.tone ?? ''}`}>
+          {c.text}
+        </span>
+      ))}
+    </>
+  );
 }
 
 // ---------------------------------------------------------------- completed session
@@ -653,14 +787,24 @@ function SessionSummary({
       setMsg(errorText(e));
     }
   }
+  const when = new Date(`${session.sessionDate}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
   return (
     <div className="stack">
+      <nav className="crumbs">
+        <Link href={`/trackers/${tracker.id}`}>{tracker.displayName}</Link> <span>›</span> {session.name}
+      </nav>
       <PageHeader
         title={session.name}
-        subtitle={`${tracker.displayName} · ${session.sessionDate} · ${session.entryCount} entries${session.isAutoClosed ? ' · auto-closed' : ''}`}
+        subtitle={`${when} · ${session.entryCount} ${session.entryCount === 1 ? 'entry' : 'entries'}${session.isAutoClosed ? ' · closed automatically' : ''}`}
         actions={
           <>
-            <Badge tone={session.status === 'COMPLETED' ? 'ok' : 'default'}>{session.status.toLowerCase()}</Badge>
+            <Badge tone={session.status === 'COMPLETED' ? 'ok' : 'default'}>
+              {session.status === 'COMPLETED' ? 'Completed' : 'Discarded'}
+            </Badge>
             <button
               className="btn"
               onClick={() => {
@@ -671,7 +815,7 @@ function SessionSummary({
               Rename
             </button>
             <Link className="btn btn-primary" href={`/trackers/${tracker.id}/charts`}>
-              Charts
+              📈 Charts
             </Link>
           </>
         }
@@ -680,38 +824,42 @@ function SessionSummary({
       {used.length === 0 && <Empty>This session has no entries.</Empty>}
       {used.map((a) => {
         const rows = entries.filter((e) => e.activityCode === a.code);
+        const metrics = a.metrics
+          .filter((m) => !m.hidden)
+          .map((m) => ({
+            m,
+            r: evaluateMetric(
+              m,
+              rows.map((e) => ({ values: e.values })),
+            ),
+          }))
+          .filter(({ m, r }) => m.kind !== 'RATIO' || (r.den ?? 0) > 0)
+          .slice(0, 8);
         return (
           <Card key={a.code} title={a.name}>
-            <div className="stats" style={{ marginBottom: 12 }}>
-              {a.metrics
-                .filter((m) => !m.hidden)
-                .slice(0, 8)
-                .map((m) => {
-                  const r = evaluateMetric(
-                    m,
-                    rows.map((e) => ({ values: e.values })),
-                  );
-                  return (
-                    <div className="stat" key={m.key}>
-                      <div className="stat-label">{m.label}</div>
-                      <div className="stat-value" style={{ fontSize: 18 }}>
-                        {formatMetric(m, r.value, prefs)}
-                      </div>
-                      {m.kind === 'RATIO' && r.den !== null && (
-                        <div className="stat-hint">
-                          {r.num} of {r.den}
-                        </div>
-                      )}
+            <div className="stats" style={{ marginBottom: 14 }}>
+              {metrics.map(({ m, r }) => (
+                <div className="stat" key={m.key}>
+                  <div className="stat-label">{m.label}</div>
+                  <div className="stat-value" style={{ fontSize: 20 }}>
+                    {formatMetric(m, r.value, prefs)}
+                  </div>
+                  {m.kind === 'RATIO' && r.den !== null && (
+                    <div className="stat-hint">
+                      {r.num} of {r.den}
                     </div>
-                  );
-                })}
+                  )}
+                </div>
+              ))}
             </div>
             {rows.map((e) => (
               <div key={e.clientEntryId} className="entry-row">
                 <div className="entry-seq">
                   {a.grouping ? `${e.groupNo}.${((e.seqNo - 1) % a.grouping.size) + 1}` : `#${e.seqNo}`}
                 </div>
-                <div className="entry-vals">{formatValues(a, e.values, tracker.displayUnits, prefs)}</div>
+                <div className="entry-vals">
+                  <EntryChips activity={a} values={e.values} displayUnits={tracker.displayUnits} prefs={prefs} />
+                </div>
                 <span />
               </div>
             ))}
@@ -726,7 +874,7 @@ function SessionSummary({
           maxLength={2000}
           placeholder="What did you work on?"
         />
-        <button className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => save({ notes })}>
+        <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => save({ notes })}>
           Save notes
         </button>
       </Card>

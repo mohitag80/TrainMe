@@ -65,3 +65,15 @@ export function defaultSessionName(trackerName: string, at = new Date()): string
   const part = h >= 5 && h < 12 ? 'Morning' : h >= 12 && h < 17 ? 'Afternoon' : h >= 17 && h < 21 ? 'Evening' : 'Night';
   return `${trackerName} – ${part}`;
 }
+
+/** Friendly timestamp: "Today 10:05", "Yesterday 18:30", "Tomorrow 07:00" or "3 Oct, 10:05". */
+export function friendlyTime(iso: string, now = new Date()): string {
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((day(at) - day(now)) / 86_400_000);
+  if (diff === 0) return `Today ${time}`;
+  if (diff === -1) return `Yesterday ${time}`;
+  if (diff === 1) return `Tomorrow ${time}`;
+  return `${at.toLocaleDateString([], { day: 'numeric', month: 'short', year: at.getFullYear() === now.getFullYear() ? undefined : 'numeric' })}, ${time}`;
+}

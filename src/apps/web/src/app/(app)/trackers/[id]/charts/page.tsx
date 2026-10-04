@@ -1,5 +1,5 @@
 'use client';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { UnitPreferences } from '@trainme/units';
@@ -7,7 +7,7 @@ import { ErrorBanner, Spinner, Tabs } from '@/components/client-ui';
 import { Card, Empty, PageHeader } from '@/components/ui';
 import { displayUnitFor, formatMetric, todayLocal, units } from '@/lib/client/format';
 import { useData } from '@/lib/client/use-data';
-import type { Profile, TrackerDetail, TrackerSchema } from '@/lib/types';
+import type { Profile, TrackerDetail, TrackerSchema, TrackerSummary } from '@/lib/types';
 
 type Point = {
   period: string;
@@ -29,7 +29,10 @@ type Day = {
 /** FR-ANL-01/02/08/11: series from rollups; ratios show "num of den"; units follow the user's choice. */
 export default function ChartsPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const tracker = useData<TrackerDetail>(`/trackers/${id}`);
+  const all = useData<{ items: TrackerSummary[] }>('/trackers');
+  const others = (all.data?.items ?? []).filter((t) => t.status === 'ACTIVE');
   const schema = useData<TrackerSchema>(`/trackers/${id}/schema`);
   const profile = useData<Profile>('/profiles/me');
   const activities = (schema.data?.activities ?? []).filter((a) => !a.hidden);
@@ -88,6 +91,22 @@ export default function ChartsPage() {
       <PageHeader
         title={`${tracker.data.displayName} · Charts`}
         subtitle="Daily, weekly and monthly values from completed sessions."
+        actions={
+          others.length > 1 ? (
+            <select
+              value={id}
+              onChange={(e) => router.push(`/trackers/${e.target.value}/charts`)}
+              aria-label="Tracker"
+              className="wide-select"
+            >
+              {others.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.displayName}
+                </option>
+              ))}
+            </select>
+          ) : undefined
+        }
       />
       <Card>
         <div className="row gap wrap">
@@ -97,7 +116,7 @@ export default function ChartsPage() {
               setActivityCode(e.target.value);
               setItemId(undefined);
             }}
-            style={{ maxWidth: 280 }}
+            className="wide-select"
             aria-label="Activity"
           >
             {activities.map((a) => (
@@ -109,7 +128,7 @@ export default function ChartsPage() {
           <select
             value={item.id}
             onChange={(e) => setItemId(e.target.value)}
-            style={{ maxWidth: 280 }}
+            className="wide-select"
             aria-label="Metric"
           >
             {items.map((i) => (
