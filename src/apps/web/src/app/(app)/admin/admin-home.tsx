@@ -85,6 +85,8 @@ export function AdminHome() {
         ]}
       />
 
+      <DraftsWaiting profiles={profiles.data.items} activities={activities.data.items} />
+
       {view === 'catalog' && (
         <div className="admin-split">
           <Card title="Categories">
@@ -282,6 +284,54 @@ function ActivityList({ title, rows }: { title: string; rows: ActivityRow[] }) {
           </table>
         </div>
       )}
+    </Card>
+  );
+}
+
+/** Unfinished work first: every profile/activity whose latest version is a draft, with a link to continue. */
+function DraftsWaiting({ profiles, activities }: { profiles: ProfileRow[]; activities: ActivityRow[] }) {
+  const items = [
+    ...profiles
+      .filter((p) => p.status === 'DRAFT')
+      .map((p) => ({
+        kind: 'Profile',
+        name: p.name,
+        href: `/admin/profiles/${encodeURIComponent(p.code)}/${p.version}`,
+        live: p.publishedVersion !== null,
+        where: p.placement,
+      })),
+    ...activities
+      .filter((a) => a.status === 'DRAFT')
+      .map((a) => ({
+        kind: 'Activity',
+        name: a.name,
+        href: `/admin/activities/${encodeURIComponent(a.code)}/${a.version}`,
+        live: a.publishedVersion !== null,
+        where: a.placements[0] ?? [],
+      })),
+  ];
+  if (items.length === 0) return null;
+  return (
+    <Card title={`Drafts waiting to be published · ${items.length}`} className="drafts-card">
+      <ul className="list">
+        {items.map((i) => (
+          <li key={i.href}>
+            <div>
+              <Link className="pname" href={i.href}>
+                {i.name}
+              </Link>
+              <div className="phint">
+                {i.kind}
+                {i.where.length > 0 && <> · {pathText(i.where)}</>}
+                {i.live ? ' · changes to a published version' : ' · not in the Catalog yet'}
+              </div>
+            </div>
+            <Link className="btn btn-sm btn-primary" href={i.href}>
+              Continue
+            </Link>
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }

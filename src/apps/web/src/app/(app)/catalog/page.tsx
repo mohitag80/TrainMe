@@ -143,7 +143,9 @@ export default function CatalogPage() {
                 <h3>{t.name}</h3>
                 <p className="small muted">{t.description}</p>
                 <p className="small" style={{ marginTop: 8 }}>
-                  <Badge>{t.activityCount} activities</Badge>
+                  <Badge>
+                    {t.activityCount} {t.activityCount === 1 ? 'activity' : 'activities'}
+                  </Badge>
                 </p>
               </Link>
             ))}

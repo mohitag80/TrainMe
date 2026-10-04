@@ -45,6 +45,9 @@ const templateBody = z.object({
   activityCodes: z.array(z.string().min(1).max(80)).max(60),
 });
 
+/** `publishActivities`: also publish the profile's draft activities (otherwise 409 lists them). */
+const publishBody = z.object({ publishActivities: z.boolean().default(false) }).default({ publishActivities: false });
+
 const asActivity = (b: z.infer<typeof activityBody>): ActivityInput => ({
   ...b,
   parameters: b.parameters as unknown as ParameterDefinition[],
@@ -202,8 +205,13 @@ export class AdminController {
 
   @Post('templates/:code/versions/:version/publish')
   @HttpCode(200)
-  publish(@CurrentUser() user: AuthUser, @Param('code') code: string, @Param('version', versionParam) version: number) {
-    return this.editor.publishTemplate(user.id, code, version);
+  publish(
+    @CurrentUser() user: AuthUser,
+    @Param('code') code: string,
+    @Param('version', versionParam) version: number,
+    @Body(new ZodPipe(publishBody, '/body')) b: z.infer<typeof publishBody>,
+  ) {
+    return this.editor.publishTemplate(user.id, code, version, b.publishActivities);
   }
 
   @Post('templates/:code/versions/:version/retire')

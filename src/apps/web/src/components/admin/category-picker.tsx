@@ -21,7 +21,9 @@ export function CategoryPicker({
   disabled?: boolean;
 }) {
   const selected = tree.find((n) => n.code === value);
-  const [open, setOpen] = useState(!selected);
+  // Until the admin opens or closes it, the picker follows the (possibly late-loading) value: closed once placed.
+  const [choice, setOpen] = useState<boolean | null>(null);
+  const open = choice ?? !selected;
   if (!open || disabled)
     return (
       <div className="picked">

@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type {
   DataType,
@@ -80,6 +80,20 @@ export function ActivityEditor({
   categoryCode?: string;
 }) {
   const router = useRouter();
+  // Created from a profile's "+ New activity": go back there afterwards and add it to that profile.
+  const sp = useSearchParams();
+  const forProfile = sp.get('profile')
+    ? { code: sp.get('profile')!, version: sp.get('pv') ?? '1', name: sp.get('pname') ?? 'the profile' }
+    : null;
+  const keepQuery = forProfile
+    ? `?${new URLSearchParams({ profile: forProfile.code, pv: forProfile.version, pname: forProfile.name })}`
+    : '';
+  const backToProfile = (activityCode: string) => {
+    if (forProfile)
+      router.push(
+        `/admin/profiles/${encodeURIComponent(forProfile.code)}/${forProfile.version}?add=${encodeURIComponent(activityCode)}`,
+      );
+  };
   const tree = useData<{ items: TreeNode[] }>('/admin/catalog/tree');
   const units = useData<{ units: Unit[] }>('/units');
   const doc = useData<ActivityDoc>(
@@ -149,7 +163,7 @@ export function ActivityEditor({
             )
           : await api<{ code: string; version: number }>('/admin/catalog/activities', { method: 'POST', body: body() });
       setMsg({ tone: 'ok', text: 'Draft saved. Users will not see it until you publish.' });
-      if (!code) router.replace(`/admin/activities/${encodeURIComponent(r.code)}/${r.version}`);
+      if (!code) router.replace(`/admin/activities/${encodeURIComponent(r.code)}/${r.version}${keepQuery}`);
       else await doc.reload();
       return r;
     } catch (e) {
@@ -175,6 +189,10 @@ export function ActivityEditor({
           ? `Published. These profiles got a new version with it: ${r.updatedTemplates.join(', ')}. Their users will see “update available”.`
           : 'Published. It can now be added to profiles and to trackers from the catalog.',
       });
+      if (forProfile) {
+        backToProfile(saved.code);
+        return;
+      }
       router.replace(`/admin/activities/${encodeURIComponent(saved.code)}/${saved.version}`);
       await doc.reload();
     } catch (e) {
@@ -286,6 +304,17 @@ export function ActivityEditor({
           )
         }
       />
+      {forProfile && (
+        <Notice tone="warn">
+          Creating this for the profile “{forProfile.name}”. When you publish, it is added to that profile and you go
+          back there.{' '}
+          {code && (
+            <button className="btn btn-sm" onClick={() => backToProfile(code)}>
+              Add to “{forProfile.name}” and go back
+            </button>
+          )}
+        </Notice>
+      )}
       {msg && (
         <Notice tone={msg.tone}>
           {msg.text}

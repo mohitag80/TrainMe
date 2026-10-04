@@ -20,7 +20,8 @@ export default async function TemplatePage({ params }: { params: Promise<{ code:
             <h1>{t.name}</h1>
             {t.description && <p className="hero-sub">{t.description}</p>}
             <p className="hero-meta">
-              {t.activities.length} activities · you can add, hide or rename anything after you start
+              {t.activities.length} {t.activities.length === 1 ? 'activity' : 'activities'} · you can add, hide or
+              rename anything after you start
             </p>
           </div>
           <StartTracker templateCode={t.code} name={t.name} />

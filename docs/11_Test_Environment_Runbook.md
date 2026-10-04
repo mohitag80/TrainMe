@@ -269,6 +269,10 @@ Base URL: `https://mohitconcert11.fyre.ibm.com:8443/api/v1` (curl needs `-k` for
 | POST | `/admin/catalog/{activities\|templates}/{code}/drafts` | curator, admin | start editing: copies the latest version into a new draft |
 | POST | `/admin/catalog/activities/{code}/versions/{v}/publish` · `/retire` | curator, admin | publish (published profiles using it get a new version automatically) / retire |
 
+Publishing a profile whose activities are still drafts: `POST …/templates/{code}/versions/{v}/publish` with `{"publishActivities":true}` publishes them first; without it `409 activities-not-published` lists them (`draftActivities`).
+
+**Admin walkthrough (web):** Admin → **+ New profile** → name → *Where it belongs*: pick a node, **+ Add a category under …** if the sport is missing (e.g. Sports › Field Hockey) → **Place it here** → pick activities on the right or **+ New activity** (saves the profile, opens the activity editor; publishing the activity adds it to the profile and returns) → checklist turns green → **Publish** (confirms any draft activities) → **View it as users see it**. Unfinished work is listed under *Drafts waiting to be published* on the Admin home.
+
 Web: **Admin → Catalog tree / Profiles / Activities**. Place items by name in the tree (e.g. Sports › Racquet Sports › Table Tennis); codes are never shown. A field's kind of answer and unit are fixed once published (`422 immutable-field`). Every change is written to `catalog_audit`.
 
 Examples:

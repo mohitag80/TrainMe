@@ -1,12 +1,13 @@
 'use client';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { CategoryPicker, Crumbs } from '@/components/admin/category-picker';
 import { ErrorBanner, Notice, Spinner } from '@/components/client-ui';
 import { Badge, Card, Empty, PageHeader } from '@/components/ui';
 import {
   activityKindLabel,
+  pathText,
   STATUS_LABEL,
   STATUS_TONE,
   type ActivityRow,
@@ -31,6 +32,7 @@ export function ProfileEditor({
   categoryCode?: string;
 }) {
   const router = useRouter();
+  const addParam = useSearchParams().get('add');
   const tree = useData<{ items: TreeNode[] }>('/admin/catalog/tree');
   const all = useData<{ items: ActivityRow[] }>('/admin/catalog/activities');
   const doc = useData<ProfileDoc>(
@@ -42,7 +44,7 @@ export function ProfileEditor({
   const [picked, setPicked] = useState<string[]>([]);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string; list?: string[] }>();
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string; list?: string[]; link?: string }>();
 
   useEffect(() => {
     const d = doc.data;
@@ -52,6 +54,25 @@ export function ProfileEditor({
     setCategory(d.categoryCode);
     setPicked(d.activities.map((a) => a.code));
   }, [doc.data]);
+
+  // Back from "+ New activity": add the activity just created to this draft and save it straight away.
+  useEffect(() => {
+    const d = doc.data;
+    const added = addParam ? all.data?.items.find((a) => a.code === addParam) : undefined;
+    if (!d || !added || d.status !== 'DRAFT') return;
+    router.replace(`/admin/profiles/${encodeURIComponent(d.code)}/${d.version}`);
+    if (d.activities.some((a) => a.code === added.code)) return;
+    const next = [...d.activities.map((a) => a.code), added.code];
+    setPicked(next);
+    void save(next).then(
+      (ok) =>
+        ok &&
+        setMsg({
+          tone: 'ok',
+          text: `Added “${added.name}”. ${added.status === 'PUBLISHED' ? 'Click Publish to show this profile in the Catalog.' : 'Publish that activity, then this profile.'}`,
+        }),
+    );
+  }, [doc.data, all.data, addParam]);
 
   const nodes = tree.data?.items ?? [];
   const byCode = useMemo(() => new Map((all.data?.items ?? []).map((a) => [a.code, a])), [all.data]);
@@ -75,9 +96,13 @@ export function ProfileEditor({
     setMsg({ tone: 'bad', text: errors.length ? 'Please fix these:' : errorText(e), list: errors });
   };
 
-  async function save(): Promise<{ code: string; version: number } | null> {
+  async function save(activityCodes = picked): Promise<{ code: string; version: number } | null> {
     if (!category) {
       setMsg({ tone: 'bad', text: 'Choose where this profile belongs in the catalog.' });
+      return null;
+    }
+    if (name.trim().length < 2) {
+      setMsg({ tone: 'bad', text: 'Give the profile a name first.' });
       return null;
     }
     setBusy(true);
@@ -86,7 +111,7 @@ export function ProfileEditor({
         name: name.trim(),
         description: description.trim() || null,
         categoryCode: category,
-        activityCodes: picked,
+        activityCodes,
       };
       const r =
         code && version
@@ -117,6 +142,60 @@ export function ProfileEditor({
       setBusy(false);
     }
   }
+
+  /** Save, then publish – including any draft activities, after the admin confirms them by name. */
+  async function publishNow() {
+    const s = await save();
+    if (!s) return;
+    const drafts = picked
+      .map((c) => byCode.get(c))
+      .filter((a): a is ActivityRow => !!a && (a.status === 'DRAFT' || a.hasDraft))
+      .map((a) => a.name);
+    if (
+      drafts.length &&
+      !confirm(`Publishing this profile also publishes these activities:\n\n• ${drafts.join('\n• ')}\n\nContinue?`)
+    )
+      return;
+    setBusy(true);
+    try {
+      await api(`/admin/catalog/templates/${encodeURIComponent(s.code)}/versions/${s.version}/publish`, {
+        method: 'POST',
+        body: { publishActivities: drafts.length > 0 },
+      });
+      setMsg({
+        tone: 'ok',
+        text: 'Published – it is now in the Catalog for everyone.',
+        link: `/catalog/${encodeURIComponent(s.code)}`,
+      });
+      router.replace(`/admin/profiles/${encodeURIComponent(s.code)}/${s.version}`);
+      await Promise.all([doc.reload(), all.reload()]);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const placed = nodes.find((n) => n.code === category);
+  const draftActivities = picked.map((c) => byCode.get(c)).filter((a) => a && (a.status === 'DRAFT' || a.hasDraft));
+  const checks = [
+    { ok: name.trim().length >= 2, text: name.trim().length >= 2 ? `Named “${name.trim()}”` : 'Give it a name' },
+    {
+      ok: !!placed,
+      text: placed ? `Placed in ${pathText(placed.path)}` : 'Choose where it belongs in the catalog',
+      tip:
+        placed && placed.level === 1
+          ? `Tip: place it under a sport or area (e.g. ${placed.name} › Swimming) so users find it there – add one with “Change”.`
+          : undefined,
+    },
+    {
+      ok: picked.length > 0,
+      text: picked.length
+        ? `${picked.length} ${picked.length === 1 ? 'activity' : 'activities'}${draftActivities.length ? ` – ${draftActivities.length} still a draft, published together with the profile` : ''}`
+        : 'Add at least one activity (pick one on the right, or “+ New activity”)',
+    },
+  ];
+  const ready = checks.every((c) => c.ok);
 
   if (doc.error) return <ErrorBanner error={doc.error} />;
   if (!tree.data || !all.data || (code && !d)) return <Spinner />;
@@ -185,21 +264,21 @@ export function ProfileEditor({
                   Delete draft
                 </button>
               )}
-              <button className="btn" disabled={busy} onClick={save}>
+              <button className="btn" disabled={busy} onClick={() => save()}>
                 Save draft
               </button>
               <button
                 className="btn btn-primary"
-                disabled={busy || picked.length === 0}
-                onClick={async () => {
-                  const s = await save();
-                  if (!s) return;
-                  await act(
-                    `/admin/catalog/templates/${encodeURIComponent(s.code)}/versions/${s.version}/publish`,
-                    'Published. It is now in the catalog; users of the previous version see “update available”.',
-                    () => router.replace(`/admin/profiles/${encodeURIComponent(s.code)}/${s.version}`),
-                  );
-                }}
+                disabled={busy || !ready}
+                title={
+                  ready
+                    ? 'Make it visible in the Catalog'
+                    : checks
+                        .filter((c) => !c.ok)
+                        .map((c) => c.text)
+                        .join(' · ')
+                }
+                onClick={publishNow}
               >
                 Publish
               </button>
@@ -207,9 +286,39 @@ export function ProfileEditor({
           )
         }
       />
+      {(!d || d.status === 'DRAFT') && (
+        <Card title={ready ? 'Ready to publish' : 'Before you can publish'} className="checklist-card">
+          <p className="small muted" style={{ marginTop: -6 }}>
+            This is a draft – nobody else sees it until you click Publish.
+          </p>
+          <ul className="checklist">
+            {checks.map((c, i) => (
+              <li key={i} className={c.ok ? 'ok' : ''}>
+                <span className="tick">{c.ok ? '✓' : '○'}</span>
+                <span>
+                  {c.text}
+                  {c.tip && <span className="field-hint"> {c.tip}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+      {d?.status === 'PUBLISHED' && !msg && (
+        <Notice tone="ok">
+          Live in the Catalog for everyone.{' '}
+          <Link href={`/catalog/${encodeURIComponent(d.code)}`}>View it as users see it →</Link>
+        </Notice>
+      )}
       {msg && (
         <Notice tone={msg.tone}>
           {msg.text}
+          {msg.link && (
+            <>
+              {' '}
+              <Link href={msg.link}>View it as users see it →</Link>
+            </>
+          )}
           {msg.list && msg.list.length > 0 && (
             <ul className="error-list">
               {msg.list.map((m, i) => (
@@ -331,12 +440,24 @@ export function ProfileEditor({
           <Card
             title="Add activities"
             actions={
-              <Link
+              <button
                 className="btn btn-sm"
-                href={`/admin/activities/new${category ? `?category=${encodeURIComponent(category)}` : ''}`}
+                disabled={busy}
+                title="Saves this profile as a draft, then creates the activity and brings you back"
+                onClick={async () => {
+                  const s = await save();
+                  if (!s) return;
+                  const qs = new URLSearchParams({
+                    category: category ?? '',
+                    profile: s.code,
+                    pv: String(s.version),
+                    pname: name.trim(),
+                  });
+                  router.push(`/admin/activities/new?${qs}`);
+                }}
               >
                 + New activity
-              </Link>
+              </button>
             }
           >
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search activities…" />

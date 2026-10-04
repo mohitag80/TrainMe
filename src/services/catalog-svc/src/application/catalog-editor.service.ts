@@ -314,13 +314,20 @@ export class CatalogEditorService {
   async publishActivity(actorId: string, code: string, version: number) {
     const result = await this.db.transaction().execute(async (trx) => {
       const row = await this.lockDraft(trx, 'activityDefinition', code, version);
+      const { name } = await trx
+        .selectFrom('activityDefinition')
+        .select('name')
+        .where('id', '=', row.id)
+        .executeTakeFirstOrThrow();
       const fields = await trx
         .selectFrom('parameterDefinition')
         .select('key')
         .where('activityId', '=', row.id)
         .execute();
       if (fields.length === 0)
-        throw ProblemError.validation([field('/parameters', 'required', 'Add at least one field before publishing')]);
+        throw ProblemError.validation([
+          field('/parameters', 'required', `Add at least one field to “${name}” before publishing`),
+        ]);
       await trx
         .updateTable('activityDefinition')
         .set({ status: 'RETIRED' })
@@ -503,7 +510,26 @@ export class CatalogEditorService {
    * Publishes a template draft: links every activity to its latest published version (all must be published),
    * then hands over to the status change that retires the previous version and announces the release.
    */
-  async publishTemplate(actorId: string, code: string, version: number) {
+  async publishTemplate(actorId: string, code: string, version: number, publishActivities = false) {
+    // Activities still in draft are published first (one click for the admin), or listed so the UI can ask.
+    const drafts = await this.db
+      .selectFrom('profileTemplate as t')
+      .innerJoin('templateActivity as ta', 'ta.profileTemplateId', 't.id')
+      .innerJoin('activityDefinition as linked', 'linked.id', 'ta.activityId')
+      .innerJoin('activityDefinition as a', 'a.code', 'linked.code')
+      .select(['a.code', 'a.version', 'a.name'])
+      .where('t.code', '=', code)
+      .where('t.version', '=', version)
+      .where('t.status', '=', 'DRAFT')
+      .where('a.status', '=', 'DRAFT')
+      .execute();
+    if (drafts.length && !publishActivities)
+      throw ProblemError.conflict(
+        'activities-not-published',
+        `These activities are drafts: ${drafts.map((d) => `“${d.name}”`).join(', ')}`,
+        { draftActivities: drafts.map((d) => d.name) },
+      );
+    for (const d of drafts) await this.publishActivity(actorId, d.code, d.version);
     await this.db.transaction().execute(async (trx) => {
       const t = await trx
         .selectFrom('profileTemplate')
@@ -701,6 +727,17 @@ export class CatalogEditorService {
       .where('t.status', '=', 'PUBLISHED')
       .where('a.code', '=', code)
       .where('a.id', '!=', activityId)
+      // A profile with an open draft picks the new version up when that draft is published.
+      .where(({ not, exists, selectFrom }) =>
+        not(
+          exists(
+            selectFrom('profileTemplate as d')
+              .select('d.id')
+              .whereRef('d.code', '=', 't.code')
+              .where('d.status', '=', 'DRAFT'),
+          ),
+        ),
+      )
       .execute();
     for (const t of users) {
       const links = await trx
