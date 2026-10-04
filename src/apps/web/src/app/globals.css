@@ -1111,3 +1111,41 @@ td.right {
   letter-spacing: 0;
   font-weight: 500;
 }
+
+/* activity navigation */
+.anchor {
+  scroll-margin-top: 16px;
+}
+a.chip {
+  text-decoration: none;
+  display: inline-block;
+}
+.activity-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* phones: one swipeable row instead of several lines of pills */
+@media (max-width: 640px) {
+  .activity-pills {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+  }
+}
+.activity-pills .chip {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pill-count {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
+}
+.chip.on .pill-count {
+  background: rgba(255, 255, 255, 0.25);
+}

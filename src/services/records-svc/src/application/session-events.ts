@@ -38,6 +38,10 @@ export class SessionEvents {
     return this.ref(trx, EVENT_TYPES.sessionDiscarded, s);
   }
 
+  reopened(trx: Trx, s: SessionRow) {
+    return this.ref(trx, EVENT_TYPES.sessionReopened, s);
+  }
+
   deleted(trx: Trx, s: SessionRow) {
     return this.ref(trx, EVENT_TYPES.sessionDeleted, s);
   }

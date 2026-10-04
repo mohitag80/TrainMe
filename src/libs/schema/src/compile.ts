@@ -67,24 +67,12 @@ export function compileEffectiveSchema(
   const issues: SchemaIssue[] = [];
   const units = opts.units ?? new UnitRegistry();
   const activities = new Map<string, Draft>();
-  for (const a of base.activities) {
-    activities.set(a.code, {
-      code: a.code,
-      name: a.name,
-      kind: a.kind,
-      recordingMode: a.recordingMode,
-      grouping: a.grouping,
-      maxEntries: a.maxEntries,
-      targets: a.targets,
-      parameters: clone(a.parameters),
-      metrics: clone(a.metrics),
-    });
-  }
+  for (const a of base.activities) activities.set(a.code, draftFromSnapshot(a));
 
   for (const o of overrides) {
     const at = `/overrides/${o.id}`;
     const fail = (code: string, message: string) => issues.push({ pointer: at, code, message });
-    if (o.action === 'ADD' && opts.allowCustomItems === false) {
+    if (o.action === 'ADD' && opts.allowCustomItems === false && !isCatalogActivity(o)) {
       fail('plan-limit', 'Your plan does not allow custom parameters, metrics or activities');
       continue;
     }
@@ -136,8 +124,34 @@ export function compileEffectiveSchema(
 
 // ------------------------------------------------------------------ override application
 
+/** A catalog activity's published snapshot as an editable draft (template activities and catalog adds). */
+function draftFromSnapshot(a: ActivitySnapshot): Draft {
+  return {
+    code: a.code,
+    name: a.name,
+    kind: a.kind,
+    recordingMode: a.recordingMode,
+    grouping: a.grouping,
+    maxEntries: a.maxEntries,
+    targets: a.targets,
+    parameters: clone(a.parameters),
+    metrics: clone(a.metrics),
+  };
+}
+
+/** ACTIVITY ADD that copies a published catalog activity (snapshot stored by tracker-svc, never by the client). */
+export const isCatalogActivity = (o: Override): boolean =>
+  o.target === 'ACTIVITY' && o.action === 'ADD' && o.definition.source === 'CATALOG' && isObj(o.definition.snapshot);
+
 function applyActivityOverride(o: Override, activities: Map<string, Draft>, fail: (c: string, m: string) => void) {
   const d = o.definition;
+  if (o.action === 'ADD' && isCatalogActivity(o)) {
+    const snap = d.snapshot as ActivitySnapshot;
+    if (snap.code !== o.activityCode) return fail('invalid-snapshot', 'Catalog snapshot does not match the activity code');
+    if (activities.has(snap.code)) return fail('duplicate', `Activity ${snap.code} is already in this tracker`);
+    activities.set(snap.code, draftFromSnapshot(snap));
+    return;
+  }
   if (o.action === 'ADD') {
     const code = String(d.code ?? o.activityCode);
     const mode = d.recordingMode;

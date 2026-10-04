@@ -284,6 +284,7 @@ Category codes for `?category=` / facets: see `/categories` (e.g. `cricket`, `cr
 | GET / PATCH / DELETE | `/trackers/{id}` | details · rename/archive/restore (`If-Match`) · delete |
 | GET | `/trackers/{id}/schema?version=` | effective schema (ETag `"v<n>"`, 304 on `If-None-Match`) |
 | POST | `/trackers/{id}/overrides` | ADD/MODIFY/HIDE a parameter, metric or activity (`If-Match`) → new schema version |
+| POST | `/trackers/{id}/overrides` (catalog activity) | `{"target":"ACTIVITY","action":"ADD","activityCode":"cricket.spin.delivery","definition":{"source":"CATALOG"}}` – copies the published activity (snapshot fetched by tracker-svc); allowed on every plan |
 | DELETE | `/trackers/{id}/overrides/{overrideId}` | undo a customisation |
 | GET / PUT | `/trackers/{id}/display-units` | `{"cricket.fast.delivery.speed_kmph":"mph","*.mass":"lb"}` – no schema bump |
 | POST | `/trackers/{id}/upgrade?dryRun=true` | preview / apply a newer template version |
@@ -308,6 +309,7 @@ FREE users (e.g. `ravi@`) get `403 plan-limit` for a 3rd active tracker and `422
 | POST | `/sessions/{id}/entries:batch` | checkpoint ≤ 100 entries `{batchSeq, schemaVersion, entries[], deletes[]}` – partial success, replays are no-ops |
 | POST | `/sessions/{id}/complete` | `{endedAt, entryCount, clientEntryIds?}` → `409 entries-missing` lists what to resend |
 | POST | `/sessions/{id}/discard` | discard an in-progress session (frees its name) |
+| POST | `/sessions/{id}/reopen` | resume a COMPLETED session on its own calendar day (session time zone) → IN_PROGRESS; other days `409 reopen-window-closed`. Charts keep the old figures until it is completed again, which replaces them |
 | PATCH / DELETE | `/sessions/{id}` | rename, move date, notes/tags (`If-Match`) · delete |
 | GET | `/sessions/search?q=` | S5 text search over name/notes/tags (last 12 months) |
 | GET | `/entries/search?trackerId=&activity=&where=speed_kmph:gte:140` | S7 entry search (≤ 366 days) |

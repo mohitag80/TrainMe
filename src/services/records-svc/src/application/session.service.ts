@@ -298,6 +298,36 @@ export class SessionService {
     });
   }
 
+  /**
+   * Resumes a finished session on its own calendar day (in the session's time zone). Charts keep the last
+   * completed figures until it is completed again, which replaces them (analytics upserts per session).
+   */
+  async reopen(user: AuthUser, id: string) {
+    return this.db.transaction().execute(async (trx) => {
+      const s = await this.lockOwned(trx, user, id, undefined);
+      if (s.status === 'IN_PROGRESS') return s;
+      if (s.status !== 'COMPLETED') throw ProblemError.conflict('not-completed', `Session is ${s.status}`);
+      if (localDate(new Date(), s.timezone) !== s.sessionDate)
+        throw ProblemError.conflict('reopen-window-closed', 'A session can only be resumed on the day it was recorded');
+      await trx
+        .updateTable('activitySession')
+        .set({
+          status: 'IN_PROGRESS',
+          endedAt: null,
+          isAutoClosed: false,
+          lastSyncedAt: new Date(), // restarts the idle clock so auto-close does not end it straight away
+          rowVersion: s.rowVersion + 1,
+          updatedAt: new Date(),
+        })
+        .where('id', '=', id)
+        .where('sessionDate', '=', s.sessionDate)
+        .execute();
+      const reopened = await this.loadOwned(trx, user, id);
+      await this.events.reopened(trx, reopened);
+      return reopened;
+    });
+  }
+
   async remove(user: AuthUser, id: string, ifMatch: number | undefined): Promise<void> {
     await this.db.transaction().execute(async (trx) => {
       const s = await this.lockOwned(trx, user, id, ifMatch);

@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ProblemError } from '@trainme/errors';
 import { ServiceClient, UpstreamError } from '@trainme/http-client';
 import type { Logger } from '@trainme/observability';
-import type { TemplateSnapshot } from '@trainme/schema';
+import type { ActivitySnapshot, TemplateSnapshot } from '@trainme/schema';
 import { LOGGER, SERVICE_CONFIG } from '@trainme/service-kit';
 import type { TrackerConfig } from '../config/tracker.config.js';
 
@@ -24,6 +24,19 @@ export class CatalogClient {
     } catch (err) {
       if (err instanceof UpstreamError && err.status === 404)
         throw ProblemError.notFound(`Template ${code}${version ? ` v${version}` : ''}`);
+      throw err;
+    }
+  }
+
+  /** Latest published version of one catalog activity (to add it to a tracker). */
+  async activity(code: string, requestId?: string): Promise<ActivitySnapshot> {
+    try {
+      return await this.http.get<ActivitySnapshot>(
+        `/api/v1/activities/${encodeURIComponent(code)}`,
+        requestId ? { requestId } : {},
+      );
+    } catch (err) {
+      if (err instanceof UpstreamError && err.status === 404) throw ProblemError.notFound(`Activity ${code}`);
       throw err;
     }
   }

@@ -420,33 +420,31 @@ function Recorder({
         }
       />
       {syncError && <Notice tone="bad">{syncError}</Notice>}
-      <div className="recorder">
-        <Card
-          title={
-            activities.length > 1 ? (
-              <select
-                className="title-select"
-                value={activityCode}
-                onChange={(e) => {
-                  setActivityCode(e.target.value);
-                  const next = activities.find((x) => x.code === e.target.value);
-                  setValues(next ? switchDefaults(next) : {});
+      {activities.length > 1 && (
+        <div className="activity-pills" role="tablist" aria-label="Activity">
+          {activities.map((a) => {
+            const logged = entries.filter((e) => e.activityCode === a.code).length;
+            return (
+              <button
+                key={a.code}
+                role="tab"
+                aria-selected={a.code === activityCode}
+                className={a.code === activityCode ? 'chip on' : 'chip'}
+                onClick={() => {
+                  setActivityCode(a.code);
+                  setValues(switchDefaults(a));
                   setFormErrors({});
                 }}
-                aria-label="Activity"
               >
-                {activities.map((a) => (
-                  <option key={a.code} value={a.code}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              activity.name
-            )
-          }
-          actions={<Badge tone="brand">{position}</Badge>}
-        >
+                {a.name}
+                {logged > 0 && <span className="pill-count">{logged}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div className="recorder">
+        <Card title={activity.name} actions={<Badge tone="brand">{position}</Badge>}>
           <EntryForm
             activity={activity}
             values={values}
@@ -480,7 +478,9 @@ function Recorder({
               [...activityEntries].reverse().map((e) => (
                 <div key={e.clientEntryId} className="entry-row">
                   <div className="entry-seq">
-                    {activity.grouping && e.groupNo ? `${e.groupNo}.${((e.seqNo - 1) % activity.grouping.size) + 1}` : `#${e.seqNo}`}
+                    {activity.grouping && e.groupNo
+                      ? `${e.groupNo}.${((e.seqNo - 1) % activity.grouping.size) + 1}`
+                      : `#${e.seqNo}`}
                   </div>
                   <div className="entry-vals">
                     <EntryChips
@@ -787,6 +787,22 @@ function SessionSummary({
       setMsg(errorText(e));
     }
   }
+  // Resuming is allowed only on the session's own calendar day, in the time zone it was recorded in.
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: session.timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const canResume = session.status === 'COMPLETED' && session.sessionDate === today;
+  async function resume() {
+    try {
+      await api(`/sessions/${session.id}/reopen`, { method: 'POST' });
+      await onChanged();
+    } catch (e) {
+      setMsg(errorText(e));
+    }
+  }
   const when = new Date(`${session.sessionDate}T00:00:00`).toLocaleDateString(undefined, {
     weekday: 'long',
     day: 'numeric',
@@ -814,9 +830,14 @@ function SessionSummary({
             >
               Rename
             </button>
-            <Link className="btn btn-primary" href={`/trackers/${tracker.id}/charts`}>
+            <Link className={canResume ? 'btn' : 'btn btn-primary'} href={`/trackers/${tracker.id}/charts`}>
               📈 Charts
             </Link>
+            {canResume && (
+              <button className="btn btn-primary" onClick={resume} title="Add more entries to this session today">
+                ▶ Resume session
+              </button>
+            )}
           </>
         }
       />

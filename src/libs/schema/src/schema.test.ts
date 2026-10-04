@@ -131,6 +131,21 @@ describe('compileEffectiveSchema', () => {
     );
     expect(limited.issues[0]?.code).toBe('plan-limit');
   });
+
+  it('adds a catalog activity from its snapshot, even when custom items are not allowed', () => {
+    const spin: ActivitySnapshot = { ...delivery, code: 'cricket.spin.delivery', name: 'Spin delivery', grouping: null };
+    const add = (snapshot: ActivitySnapshot) =>
+      ov({ target: 'ACTIVITY', activityCode: snapshot.code, definition: { source: 'CATALOG', snapshot } });
+    const r = compileEffectiveSchema({ activities: [delivery] }, [add(spin)], { allowCustomItems: false });
+    expect(r.issues).toEqual([]);
+    expect(r.schema.activities.map((a) => a.code)).toEqual(['cricket.fast.delivery', 'cricket.spin.delivery']);
+    expect(r.schema.activities[1]).toMatchObject({ name: 'Spin delivery' });
+    expect(r.schema.activities[1]!.custom).toBeUndefined();
+    expect(r.schema.activities[1]!.metrics.map((m) => m.key)).toContain('yorker_accuracy');
+
+    const dup = compileEffectiveSchema({ activities: [delivery] }, [add(delivery)]);
+    expect(dup.issues[0]?.code).toBe('duplicate');
+  });
 });
 
 describe('EntryValidator', () => {

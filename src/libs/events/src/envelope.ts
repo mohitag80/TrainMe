@@ -46,6 +46,7 @@ export const EVENT_TYPES = {
   sessionUpdated: 'record.session.updated',
   sessionDeleted: 'record.session.deleted',
   sessionDiscarded: 'record.session.discarded',
+  sessionReopened: 'record.session.reopened',
   prAchieved: 'analytics.pr.achieved',
   streakAtRisk: 'analytics.streak.at_risk',
   notificationSend: 'notification.send',

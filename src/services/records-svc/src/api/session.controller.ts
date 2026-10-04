@@ -156,4 +156,10 @@ export class SessionController {
   discard(@CurrentUser() user: AuthUser, @Param('id', idParam) id: string) {
     return this.sessions.discard(user, id);
   }
+
+  @Post(':id/reopen')
+  @HttpCode(200)
+  reopen(@CurrentUser() user: AuthUser, @Param('id', idParam) id: string) {
+    return this.sessions.reopen(user, id);
+  }
 }

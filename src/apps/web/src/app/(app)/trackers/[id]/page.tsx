@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { EffectiveActivity, EffectiveParameter } from '@trainme/schema';
 import { ErrorBanner, Notice, Spinner } from '@/components/client-ui';
 import { ParameterTable } from '@/components/parameter-table';
@@ -21,6 +21,7 @@ export default function TrackerPage() {
   const sessions = useData<{ items: Session[] }>(`/sessions?trackerId=${id}&limit=8`);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
+  const [addingActivity, setAddingActivity] = useState<'catalog' | 'custom' | null>(null);
 
   const reloadAll = async () => {
     await Promise.all([tracker.reload(), schema.reload()]);
@@ -39,6 +40,7 @@ export default function TrackerPage() {
   if (!tracker.data || !schema.data) return <Spinner />;
   const t = tracker.data;
   const prefs = profile.data?.unitPreferences ?? {};
+  const visible = schema.data.activities.filter((a) => !a.hidden);
   const based = t.templateCode
     ? `Based on the ${humanize(t.templateCode.split('.').pop() ?? '')} profile`
     : 'Your own tracker';
@@ -117,28 +119,75 @@ export default function TrackerPage() {
 
       <div className="page-head" style={{ marginTop: 8 }}>
         <div>
-          <h2>What you record</h2>
+          <h2>
+            What you record · {visible.length} {visible.length === 1 ? 'activity' : 'activities'}
+          </h2>
           <p className="muted small">
-            Changes apply from your next session. Hidden fields stay in your history and charts.
+            Pick any of these in a session. Changes apply from your next session; removed items stay in your history and
+            charts.
           </p>
         </div>
+        <div className="row gap wrap">
+          <button
+            className={addingActivity === 'catalog' ? 'btn btn-primary' : 'btn'}
+            onClick={() => setAddingActivity(addingActivity === 'catalog' ? null : 'catalog')}
+          >
+            + Add from catalog
+          </button>
+          <button
+            className={addingActivity === 'custom' ? 'btn btn-primary' : 'btn'}
+            onClick={() => setAddingActivity(addingActivity === 'custom' ? null : 'custom')}
+          >
+            + Create your own
+          </button>
+        </div>
       </div>
-      {schema.data.activities
-        .filter((a) => !a.hidden)
-        .map((a) => (
+      <div className="chip-row">
+        {visible.map((a) => (
+          <a key={a.code} className="chip" href={`#act-${a.code}`}>
+            {a.name}
+          </a>
+        ))}
+      </div>
+      {addingActivity === 'catalog' && (
+        <AddCatalogActivity
+          trackerId={id}
+          rowVersion={t.rowVersion}
+          existing={new Set(schema.data.activities.map((a) => a.code))}
+          onChanged={async (m) => {
+            setAddingActivity(null);
+            await done(m);
+          }}
+          onError={failed}
+          onClose={() => setAddingActivity(null)}
+        />
+      )}
+      {addingActivity === 'custom' && (
+        <CustomActivity
+          trackerId={id}
+          rowVersion={t.rowVersion}
+          onChanged={async (m) => {
+            setAddingActivity(null);
+            await done(m);
+          }}
+          onError={failed}
+          onClose={() => setAddingActivity(null)}
+        />
+      )}
+      {visible.map((a) => (
+        <div key={a.code} id={`act-${a.code}`} className="anchor">
           <ActivityCard
-            key={a.code}
             trackerId={id}
             activity={a}
             displayUnits={t.displayUnits}
             prefs={prefs}
             rowVersion={t.rowVersion}
+            canRemove={visible.length > 1}
             onChanged={done}
             onError={failed}
           />
-        ))}
-
-      <CustomActivity trackerId={id} rowVersion={t.rowVersion} onChanged={done} onError={failed} />
+        </div>
+      ))}
 
       {t.overrides.length > 0 && (
         <Card title="Your changes">
@@ -267,6 +316,7 @@ function ActivityCard({
   displayUnits,
   prefs,
   rowVersion,
+  canRemove,
   onChanged,
   onError,
 }: {
@@ -275,6 +325,7 @@ function ActivityCard({
   displayUnits: Record<string, string>;
   prefs: Profile['unitPreferences'];
   rowVersion: number;
+  canRemove: boolean;
   onChanged: (msg: string) => Promise<void>;
   onError: (e: string) => void;
 }) {
@@ -317,6 +368,20 @@ function ActivityCard({
           <button className="btn btn-sm" onClick={() => setAdding(adding === 'stat' ? null : 'stat')}>
             + Add % stat
           </button>
+          {canRemove && (
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => {
+                if (confirm(`Remove “${activity.name}” from this tracker? Past sessions and charts keep it.`))
+                  void override(
+                    { target: 'ACTIVITY', action: 'HIDE' },
+                    `“${activity.name}” removed – undo it under “Your changes”.`,
+                  );
+              }}
+            >
+              Remove
+            </button>
+          )}
         </>
       }
     >
@@ -553,29 +618,121 @@ function AddStat({
   );
 }
 
+type CatalogHit = { itemCode: string; name: string; kind: string | null; sports: string[]; equipment: string[] };
+
+/** Search the published catalog and add one activity as-is (its fields and stats come from the catalog). */
+function AddCatalogActivity({
+  trackerId,
+  rowVersion,
+  existing,
+  onChanged,
+  onError,
+  onClose,
+}: {
+  trackerId: string;
+  rowVersion: number;
+  existing: Set<string>;
+  onChanged: (m: string) => Promise<void>;
+  onError: (e: string) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState<CatalogHit[] | null>(null);
+  const [busy, setBusy] = useState<string>();
+  useEffect(() => {
+    if (q.trim().length < 2) return setHits(null);
+    const timer = setTimeout(() => {
+      api<{ items: CatalogHit[] }>(`/catalog/search?q=${encodeURIComponent(q.trim())}&type=ACTIVITY&limit=12`)
+        .then((r) => setHits(r.items))
+        .catch((e) => onError(errorText(e)));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [q, onError]);
+
+  async function add(hit: CatalogHit) {
+    setBusy(hit.itemCode);
+    try {
+      await api(`/trackers/${trackerId}/overrides`, {
+        method: 'POST',
+        body: { target: 'ACTIVITY', action: 'ADD', activityCode: hit.itemCode, definition: { source: 'CATALOG' } },
+        headers: { 'if-match': `"${rowVersion}"` },
+      });
+      await onChanged(`Added “${hit.name}” – pick it in your next session.`);
+    } catch (e) {
+      onError(errorText(e));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  return (
+    <Card
+      title="Add an activity from the catalog"
+      actions={
+        <button className="btn btn-sm btn-ghost" onClick={onClose}>
+          Close
+        </button>
+      }
+    >
+      <input
+        autoFocus
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search 147 activities – e.g. spin, sprint, squat, catching"
+      />
+      {hits === null ? (
+        <p className="small muted" style={{ marginTop: 10 }}>
+          Type at least 2 letters. The activity comes with its fields and stats; you can still add or hide fields later.
+        </p>
+      ) : hits.length === 0 ? (
+        <Empty>No activities match “{q}”.</Empty>
+      ) : (
+        <ul className="list" style={{ marginTop: 10 }}>
+          {hits.map((h) => {
+            const added = existing.has(h.itemCode);
+            return (
+              <li key={h.itemCode}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>{h.name}</div>
+                  <div className="small muted">
+                    {[...h.sports.map(humanize), h.kind ? humanize(h.kind.toLowerCase()) : null]
+                      .filter(Boolean)
+                      .join(' · ')}
+                    {h.equipment.length ? ` · ${h.equipment.slice(0, 3).map(humanize).join(', ')}` : ''}
+                  </div>
+                </div>
+                {added ? (
+                  <Badge tone="ok">In this tracker</Badge>
+                ) : (
+                  <button className="btn btn-sm btn-primary" disabled={busy !== undefined} onClick={() => add(h)}>
+                    {busy === h.itemCode ? 'Adding…' : '+ Add'}
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 function CustomActivity({
   trackerId,
   rowVersion,
   onChanged,
   onError,
+  onClose,
 }: {
   trackerId: string;
   rowVersion: number;
   onChanged: (m: string) => Promise<void>;
   onError: (e: string) => void;
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [mode, setMode] = useState('PER_SET');
   const code = useMemo(() => `custom.${toKey(name).slice(0, 50)}`, [name]);
-  if (!open)
-    return (
-      <div>
-        <button className="btn" onClick={() => setOpen(true)}>
-          + Add your own activity
-        </button>
-      </div>
-    );
   return (
     <Card title="Your own activity">
       <div className="form-grid">
@@ -608,7 +765,6 @@ function CustomActivity({
                 },
                 headers: { 'if-match': `"${rowVersion}"` },
               });
-              setOpen(false);
               await onChanged(`Added “${name.trim()}” – now add its fields.`);
             } catch (e) {
               onError(errorText(e));
@@ -617,7 +773,7 @@ function CustomActivity({
         >
           Create activity
         </button>
-        <button className="btn btn-sm btn-ghost" onClick={() => setOpen(false)}>
+        <button className="btn btn-sm btn-ghost" onClick={onClose}>
           Cancel
         </button>
       </div>
@@ -723,7 +879,7 @@ function describeOverride(o: TrackerDetail['overrides'][number], schema: Tracker
   const activity = schema.activities.find((a) => a.code === o.activityCode);
   if (o.target === 'ACTIVITY')
     return o.action === 'ADD'
-      ? `activity “${String(o.definition.name ?? humanize(o.activityCode))}”`
+      ? `activity “${String(o.definition.name ?? activity?.name ?? humanize(o.activityCode))}”${o.definition.source === 'CATALOG' ? ' from the catalog' : ''}`
       : `activity “${activity?.name ?? humanize(o.activityCode)}”`;
   const item =
     activity?.parameters.find((p) => p.key === o.itemKey)?.label ??

@@ -250,7 +250,12 @@ export class TrackerService {
   }
 
   /** FR-TRK-02..06: add/modify/hide → recompile → new schema version (only if the result is valid). */
-  async addOverride(user: AuthUser, id: string, ifMatch: number | undefined, input: OverrideInput) {
+  async addOverride(user: AuthUser, id: string, ifMatch: number | undefined, input: OverrideInput, requestId?: string) {
+    // Adding a catalog activity: the snapshot always comes from catalog-svc, never from the client.
+    const fromCatalog = input.target === 'ACTIVITY' && input.action === 'ADD' && input.definition?.source === 'CATALOG';
+    const definition = fromCatalog
+      ? { source: 'CATALOG', snapshot: await this.catalog.activity(input.activityCode, requestId) }
+      : (input.definition ?? {});
     return this.mutateOverrides(user, id, ifMatch, async (trx, t, overrides) => {
       const o: Override = {
         id: newId(),
@@ -258,7 +263,7 @@ export class TrackerService {
         action: input.action,
         activityCode: input.activityCode,
         itemKey: input.itemKey ?? (typeof input.definition?.key === 'string' ? input.definition.key : null),
-        definition: input.definition ?? {},
+        definition,
       };
       if (o.target === 'ACTIVITY' && o.action === 'ADD') o.activityCode = String(o.definition.code ?? o.activityCode);
       await trx
