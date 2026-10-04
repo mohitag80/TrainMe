@@ -132,6 +132,21 @@ export class ProjectionService {
     await this.cache.invalidateGroup(chartGroupKey(ref.userId, fact.trackerId));
   }
 
+  /** tracker.deleted: every read model of that tracker goes. */
+  async removeTracker(trx: Trx, userId: string, trackerId: string): Promise<void> {
+    for (const table of ['sessionFact', 'metricRollup', 'sessionMetric', 'personalRecord', 'streak'] as const) {
+      await trx.deleteFrom(table).where('userId', '=', userId).where('trackerId', '=', trackerId).execute();
+    }
+    await this.cache.invalidateGroup(chartGroupKey(userId, trackerId));
+  }
+
+  /** user.deleted (erasure saga): all of the user's analytics rows. */
+  async removeUser(trx: Trx, userId: string): Promise<void> {
+    for (const table of ['sessionFact', 'metricRollup', 'sessionMetric', 'personalRecord', 'streak'] as const) {
+      await trx.deleteFrom(table).where('userId', '=', userId).execute();
+    }
+  }
+
   /** DAY from that day's session facts, then the enclosing WEEK and MONTH from DAY rows. */
   private async rebuildRollups(trx: Trx, userId: string, trackerId: string, date: string): Promise<void> {
     const facts = await trx

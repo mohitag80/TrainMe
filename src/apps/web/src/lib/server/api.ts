@@ -1,0 +1,46 @@
+import 'server-only';
+import { redirect } from 'next/navigation';
+import { webConfig } from './config';
+import { getSession, type Session } from './session';
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly problem: {
+      type?: string;
+      title?: string;
+      detail?: string;
+      errors?: { pointer: string; message: string }[];
+      [k: string]: unknown;
+    },
+  ) {
+    super(problem.detail ?? problem.title ?? `HTTP ${status}`);
+  }
+}
+
+/** Server components: the signed-in session, or a redirect to the login page. */
+export async function requireSession(): Promise<Session> {
+  const s = await getSession();
+  if (!s) redirect('/login');
+  return s;
+}
+
+/** Calls a TrainMe API through Kong with the user's token (server side). */
+export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const s = await requireSession();
+  const res = await fetch(`${webConfig().apiUrl}/api/v1${path}`, {
+    ...init,
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${s.accessToken}`,
+      ...(init.body ? { 'content-type': 'application/json' } : {}),
+      ...init.headers,
+    },
+    cache: 'no-store',
+    signal: AbortSignal.timeout(8_000),
+  });
+  const text = await res.text();
+  const body = text ? JSON.parse(text) : undefined;
+  if (!res.ok) throw new ApiError(res.status, body ?? {});
+  return body as T;
+}

@@ -199,6 +199,11 @@ export class SubscriptionService {
     return this.mine(user);
   }
 
+  /** Erasure: cancel without contacting Keycloak (the identity is being deleted too). */
+  async cancelForErasure(trx: Trx, userId: string): Promise<void> {
+    await this.cancelNow(trx, userId);
+  }
+
   private async activate(trx: Trx, event: WebhookEvent) {
     const { checkoutId, userId, planCode } = event.data;
     if (checkoutId) {

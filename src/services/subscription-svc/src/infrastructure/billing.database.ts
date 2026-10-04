@@ -1,5 +1,5 @@
 import type { ColumnType } from 'kysely';
-import type { OutboxEventTable } from '@trainme/kafka';
+import type { OutboxEventTable, ProcessedEventTable } from '@trainme/kafka';
 
 type Json<T> = ColumnType<T, string, string>;
 type Defaulted<T> = ColumnType<T, T | undefined, T>;
@@ -59,4 +59,5 @@ export interface BillingDatabase {
   checkoutSession: CheckoutSessionTable;
   paymentEvent: PaymentEventTable;
   outboxEvent: OutboxEventTable;
+  processedEvent: ProcessedEventTable;
 }

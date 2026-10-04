@@ -1,0 +1,29 @@
+{
+  "name": "@trainme/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TrainMe web app (Next.js App Router) with a backend-for-frontend for OIDC login and API calls",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@trainme/schema": "workspace:*",
+    "@trainme/units": "workspace:*",
+    "ioredis": "^6.0.0",
+    "next": "16.3.8",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "recharts": "^3.10.1",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
+  }
+}

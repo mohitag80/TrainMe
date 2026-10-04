@@ -1,6 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { PlatformModule } from '@trainme/service-kit';
 import { TrackerController } from './api/tracker.controller.js';
+import { ReadModelConsumer } from './application/read-model.consumer.js';
 import { TrackerService } from './application/tracker.service.js';
 import type { TrackerConfig } from './config/tracker.config.js';
 import { CatalogClient } from './infrastructure/catalog.client.js';
@@ -22,7 +23,7 @@ export class AppModule {
         }),
       ],
       controllers: [TrackerController],
-      providers: [TrackerService, CatalogClient],
+      providers: [TrackerService, CatalogClient, ReadModelConsumer],
     };
   }
 }

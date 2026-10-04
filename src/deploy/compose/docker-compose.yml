@@ -196,7 +196,9 @@ services:
     environment:
       KONG_DATABASE: 'off'
       KONG_DECLARATIVE_CONFIG: /kong/kong.yml
-      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      # 8000 = HTTP (laptop: browsers treat localhost as secure); 8443 = HTTPS with Kong's built-in self-signed
+      # certificate. Remote browsers need HTTPS: Keycloak's login cookies are Secure + SameSite=None.
+      KONG_PROXY_LISTEN: '0.0.0.0:8000, 0.0.0.0:8443 ssl http2'
       KONG_ADMIN_LISTEN: 127.0.0.1:8001
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
@@ -206,7 +208,7 @@ services:
       KONG_DNS_ERROR_TTL: '1'
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
-    ports: ['${TRAINME_HTTP_PORT:-8000}:8000']
+    ports: ['${TRAINME_HTTP_PORT:-8000}:8000', '${TRAINME_HTTPS_PORT:-8443}:8443']
     healthcheck:
       test: ['CMD', 'kong', 'health']
       interval: 10s
@@ -294,6 +296,31 @@ services:
       DATABASE_URL: postgres://notification_svc:${NOTIFICATION_DB_PASSWORD}@postgres:5432/notification_db
       SMTP_URL: smtp://mailpit:1025
       MAIL_FROM: TrainMe <no-reply@trainme.test>
+
+  # Not just "web": that is a public top-level domain, and Kong resolved it to 127.0.53.53.
+  trainme-web:
+    build: { context: ../../.., dockerfile: src/deploy/docker/web.Dockerfile }
+    image: trainme-web:local
+    restart: unless-stopped
+    depends_on:
+      valkey: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+    environment:
+      PUBLIC_URL: ${TRAINME_PUBLIC_URL}
+      API_INTERNAL_URL: http://kong:8000
+      OIDC_ISSUER_URL: ${TRAINME_PUBLIC_URL}/auth/realms/trainme
+      OIDC_INTERNAL_URL: http://keycloak:8080/auth/realms/trainme
+      OIDC_CLIENT_ID: trainme-web
+      REDIS_URL: redis://valkey:6379
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/login']
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    deploy:
+      resources:
+        limits: { memory: 256m }
 
   # ---------------------------------------------------------------- observability (optional)
   prometheus:

@@ -4,6 +4,7 @@ import { SearchController } from './api/search.controller.js';
 import { SessionController } from './api/session.controller.js';
 import { AutoCloseJob } from './application/auto-close.job.js';
 import { CheckpointService } from './application/checkpoint.service.js';
+import { CleanupConsumer } from './application/cleanup.consumer.js';
 import { HistorySearchService } from './application/history-search.service.js';
 import { SessionEvents } from './application/session-events.js';
 import { SessionService } from './application/session.service.js';
@@ -28,7 +29,15 @@ export class AppModule {
       ],
       // SearchController first: its static paths (/sessions/search) must not be captured by /sessions/:id.
       controllers: [SearchController, SessionController],
-      providers: [SessionService, CheckpointService, HistorySearchService, SessionEvents, AutoCloseJob, TrackerClient],
+      providers: [
+        SessionService,
+        CheckpointService,
+        HistorySearchService,
+        SessionEvents,
+        AutoCloseJob,
+        TrackerClient,
+        CleanupConsumer,
+      ],
     };
   }
 }

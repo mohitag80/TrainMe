@@ -2,7 +2,7 @@
 
 | Item | Value |
 |---|---|
-| Version | 1.0 · 2026-10-04 (Phase 1: platform + catalog-svc) |
+| Version | 1.1 · 2026-10-04 (all 7 services + web app; Phase 1 was platform + catalog-svc) |
 | Purpose | Day-to-day steps to deploy, access, validate and troubleshoot TrainMe in test environments |
 | Related | `04_Deployment_and_Infrastructure.md`, `10_Implementation_Conventions.md`, `src/deploy/` |
 
@@ -26,7 +26,8 @@ Everything is reached through **Kong** on one origin:
 |---|---|
 | `/api/v1/...` | the services (see §6) |
 | `/auth/...` | Keycloak (login pages, OIDC endpoints, admin console) |
-| `/` | web app ⏳ (returns an error until the web app is deployed) |
+| `/` | **web app** (Next.js): landing, sign-in, dashboard, catalog, trackers, live recording, charts, profile, plan, inbox, admin |
+| `/bff/...` | web app's backend-for-frontend: login callback, logout, API proxy (tokens stay server-side) |
 
 Internal-only ports on the VM (reach them with an SSH tunnel, §8): PostgreSQL `127.0.0.1:55432`, Valkey `127.0.0.1:6379`, Redpanda `127.0.0.1:19092`, Mailpit `127.0.0.1:8025`.
 
@@ -262,9 +263,103 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
 
 Category codes for `?category=` / facets: see `/categories` (e.g. `cricket`, `cricket.fast_bowler`, `gym.legs`, `gym.arms.biceps`).
 
-### 6.2 tracker-svc ⏳ · 6.3 records-svc ⏳ · 6.4 analytics-svc ⏳ · 6.5 user-profile-svc ⏳ · 6.6 subscription-svc ⏳ · 6.7 notification-svc ⏳
+### 6.2 tracker-svc ✅
 
-Endpoints are specified in `03_Low_Level_Design.md` §4 and will be listed here with examples as each service is deployed.
+| Method | Path | Description |
+|---|---|---|
+| GET | `/trackers` | my trackers (with "upgrade available") |
+| POST | `/trackers` | create `{templateCode, displayName?}` or blank `{displayName}` – plan limit on active trackers |
+| GET / PATCH / DELETE | `/trackers/{id}` | details · rename/archive/restore (`If-Match`) · delete |
+| GET | `/trackers/{id}/schema?version=` | effective schema (ETag `"v<n>"`, 304 on `If-None-Match`) |
+| POST | `/trackers/{id}/overrides` | ADD/MODIFY/HIDE a parameter, metric or activity (`If-Match`) → new schema version |
+| DELETE | `/trackers/{id}/overrides/{overrideId}` | undo a customisation |
+| GET / PUT | `/trackers/{id}/display-units` | `{"cricket.fast.delivery.speed_kmph":"mph","*.mass":"lb"}` – no schema bump |
+| POST | `/trackers/{id}/upgrade?dryRun=true` | preview / apply a newer template version |
+
+```bash
+TID=$(curl -s -X POST $H/api/v1/trackers -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"templateCode":"cricket.fast_bowler"}' | jq -r .id)
+curl -s -X POST $H/api/v1/trackers/$TID/overrides -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"target":"PARAMETER","action":"ADD","activityCode":"cricket.fast.delivery","definition":{"key":"slower_ball","label":"Slower ball","type":"BOOL"}}'
+```
+
+FREE users (e.g. `ravi@`) get `403 plan-limit` for a 3rd active tracker and `422 plan-limit` for custom parameters.
+
+### 6.3 records-svc ✅ (named live sessions)
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/sessions` | start `{clientSessionId, trackerId, name, startedAt, timezone, onNameConflict: REJECT\|SUFFIX}` – idempotent on `clientSessionId`; duplicate name on the same date → `409` + `suggestedName` |
+| GET | `/sessions?date=YYYY-MM-DD` | all sessions of a day across trackers (`&trackerId=`, `&from=&to=`, cursor) |
+| GET | `/sessions/lookup?date=&name=` | one session by date + name (case-insensitive) |
+| GET | `/sessions/{id}?include=entries` | session with its entries |
+| POST | `/sessions/{id}/entries:batch` | checkpoint ≤ 100 entries `{batchSeq, schemaVersion, entries[], deletes[]}` – partial success, replays are no-ops |
+| POST | `/sessions/{id}/complete` | `{endedAt, entryCount, clientEntryIds?}` → `409 entries-missing` lists what to resend |
+| POST | `/sessions/{id}/discard` | discard an in-progress session (frees its name) |
+| PATCH / DELETE | `/sessions/{id}` | rename, move date, notes/tags (`If-Match`) · delete |
+| GET | `/sessions/search?q=` | S5 text search over name/notes/tags (last 12 months) |
+| GET | `/entries/search?trackerId=&activity=&where=speed_kmph:gte:140` | S7 entry search (≤ 366 days) |
+
+Sessions left open are auto-closed after 3 h idle or local midnight + 2 h (completed if they have entries, discarded if empty).
+
+### 6.4 analytics-svc ✅ (built from completed sessions via `record.events`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/analytics/series?trackerId=&activity=&metric=yorker_accuracy&granularity=DAY\|WEEK\|MONTH` | metric series (`num`, `den`, `value`); or `&param=speed_kmph&agg=AVG\|MAX\|…` |
+| GET | `/analytics/summary?trackerId=&period=WEEK\|MONTH` | every metric, current vs previous period |
+| GET | `/analytics/day?trackerId=&date=` | each named session of a day with its metric values |
+| GET | `/analytics/records?trackerId=` | personal records (top/best-value metrics) |
+| GET | `/analytics/streaks` | current and longest streak per tracker |
+| GET | `/analytics/sessions/search?trackerId=&metric=&min=&sort=value_desc` | S6 sessions by metric value |
+
+Values are in canonical units (km/h, kg …); the apps convert to the user's units.
+
+### 6.5 user-profile-svc ✅
+
+| Method | Path | Description |
+|---|---|---|
+| GET / PUT | `/profiles/me` | profile (created on first call); `{"unitPreset":"IMPERIAL","unitPreferences":{"speed":"METRIC"}}` (`If-Match`) |
+| GET / POST / DELETE | `/profiles/me/devices[/{id}]` | push tokens |
+| POST | `/profiles/me/export` | request a data export (202) |
+| DELETE | `/profiles/me` | erase account (202) → `user.deleted` saga across services |
+| GET | `/profiles?q=` | support/admin search by email or name |
+
+### 6.6 subscription-svc ✅ (MOCK payments in test)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/plans` | public plan list (placeholder prices) |
+| GET | `/subscriptions/me` | current plan, subscription, entitlements |
+| POST | `/subscriptions/checkout` | `{planCode}` → `checkoutUrl` (mock provider page) |
+| POST | `/subscriptions/me/cancel[?immediate=true]` | cancel at period end / now |
+| GET / POST | `/mock-payments/checkout/{id}` | the mock "provider" page and its Pay/Cancel action |
+| POST | `/webhooks/payments/mock` | signed provider webhook (`x-mock-signature`), idempotent |
+
+Flow: web *Plan* page → Choose Pro → mock page → **Pay** → signed webhook → subscription ACTIVE → Keycloak `plan` attribute = PRO → `subscription.activated` → welcome email (Mailpit) + inbox entry. Sign out/in to get a token with the new plan.
+
+### 6.7 notification-svc ✅
+
+| Method | Path | Description |
+|---|---|---|
+| GET / POST / PUT / DELETE | `/reminders[/{id}]` | `{title, daysOfWeek:[1..7], timeOfDay:"06:00", timezone, channel: IN_APP\|EMAIL\|PUSH}` |
+| GET | `/notifications` | inbox (`unread` count, cursor) |
+| POST | `/notifications/{id}/read`, `/notifications/read-all` | mark read |
+| GET / PUT | `/notifications/preferences` | channels + quiet hours (`quietStart`, `quietEnd`) |
+
+Push is logged as `SKIPPED` until FCM/APNs keys exist; email goes to Mailpit in test (`ssh -L 8025:localhost:8025 …`, then http://localhost:8025).
+
+### 6.8 Web app ✅
+
+| Page | What to try |
+|---|---|
+| `/` → Sign in | log in as `asha@trainme.test` / `Passw0rd!` |
+| Catalog | search "dumbell chest", open **Fast Bowler**, *Start tracking* |
+| Tracker | add a parameter, hide one, switch speed to mph, start "Morning Nets" (try the same name twice) |
+| Session | log balls (yorker attempted → accurate appears), watch live stats, *End session* |
+| Charts | yorker accuracy daily/weekly/monthly with "n of m"; sessions of a day |
+| Profile / Plan / Inbox | Imperial units, mock checkout, reminders and quiet hours |
+| Admin (`coach@`) | publish / retire template versions |
 
 ---
 
@@ -353,8 +448,9 @@ docker exec trainme-redpanda-1 rpk topic list
 docker exec trainme-redpanda-1 rpk topic consume catalog.events -n 5 -f '%k %v\n'
 # dead letters (failed events, with x-error header)
 docker exec trainme-redpanda-1 rpk topic consume record.events.dlq -n 5 -f '%h %v\n'
-# consumer groups and lag ⏳ (once consumers exist)
+# consumer groups and lag
 docker exec trainme-redpanda-1 rpk group list
+docker exec trainme-redpanda-1 rpk group describe analytics-svc.rollups
 
 # cache keys
 docker exec trainme-valkey-1 valkey-cli --scan --pattern 'cat:*'
@@ -363,6 +459,18 @@ docker exec trainme-valkey-1 valkey-cli INCR cat:version
 ```
 
 ---
+
+### 9.1 Rebuild analytics from events (replay)
+
+Read models can be rebuilt because topics keep 30 days of events:
+
+```bash
+docker compose stop analytics-svc
+docker compose exec postgres psql -U postgres -d analytics_db \
+  -c "TRUNCATE session_fact, metric_rollup, session_metric, personal_record, streak, processed_event, outbox_event"
+docker exec trainme-redpanda-1 rpk group seek analytics-svc.rollups --to start
+docker compose start analytics-svc
+```
 
 ## 10. Logs
 
@@ -446,6 +554,10 @@ error paths. Exit code 0 = all passed. The script grows with every service.
 | Service exits with `Invalid configuration` | missing/invalid env var | the log lists every bad key; fix `.env` and restart |
 | Migration fails with `checksum mismatch` | an applied migration file was edited | never edit applied migrations; add `V<next>__...sql` |
 | Image build fails at `pnpm deploy` | registry metadata needed by pnpm 12 supply-chain check | build host needs internet access to registry.npmjs.org |
+| Web login loops back to `/login?error=login_failed` | `PUBLIC_URL` of the web container differs from the browser URL, or Valkey is down | set `TRAINME_PUBLIC_URL` to the exact URL you open; check `docker compose ps valkey` |
+| Plan still FREE after paying | the access token was issued before the payment | sign out and in again (claims are copied at login) |
+| Chart empty right after ending a session | analytics processes `record.session.completed` asynchronously | wait a few seconds; check `rpk group describe analytics-svc.rollups` for lag |
+| Email not in Mailpit | quiet hours (22:00–07:00 by default when set) or email disabled in preferences | check `notification` rows: `status`/`error` say why |
 
 ---
 
@@ -454,3 +566,4 @@ error paths. Exit code 0 = all passed. The script grows with every service.
 | Date | Change |
 |---|---|
 | 2026-10-04 | First version: Phase 1 on the test VM (Compose), tokens, users, DBeaver, Kafka/cache, smoke test |
+| 2026-10-04 | 1.1: all service APIs (§6.2–6.7), web app (§6.8), analytics replay (§9.1), smoke test covers every service, new troubleshooting rows |

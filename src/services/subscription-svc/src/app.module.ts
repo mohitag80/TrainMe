@@ -2,6 +2,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { PlatformModule } from '@trainme/service-kit';
 import { SubscriptionController } from './api/subscription.controller.js';
 import { SubscriptionService } from './application/subscription.service.js';
+import { UserEventsConsumer } from './application/user-events.consumer.js';
 import type { SubscriptionConfig } from './config/subscription.config.js';
 import { KeycloakAdminClient } from './infrastructure/keycloak-admin.client.js';
 
@@ -22,7 +23,7 @@ export class AppModule {
         }),
       ],
       controllers: [SubscriptionController],
-      providers: [SubscriptionService, KeycloakAdminClient],
+      providers: [SubscriptionService, KeycloakAdminClient, UserEventsConsumer],
     };
   }
 }

@@ -11,6 +11,10 @@ export const recordsConfigSchema = platformConfigSchema.extend({
   AUTO_CLOSE_IDLE_HOURS: z.coerce.number().positive().default(3),
   AUTO_CLOSE_INTERVAL_SECONDS: z.coerce.number().int().positive().default(600),
   SEARCH_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
+  RUN_CONSUMERS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 export type RecordsConfig = z.infer<typeof recordsConfigSchema>;
