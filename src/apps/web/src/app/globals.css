@@ -1149,3 +1149,172 @@ a.chip {
 .chip.on .pill-count {
   background: rgba(255, 255, 255, 0.25);
 }
+
+/* catalog admin */
+.admin-split {
+  display: grid;
+  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .admin-split {
+    grid-template-columns: 1fr;
+  }
+}
+.tree-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tree-scroll {
+  max-height: 460px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 6px;
+  background: var(--bg);
+}
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border-radius: 8px;
+  padding: 3px 6px;
+  text-align: left;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+}
+.tree-row.on,
+.tree-row:hover {
+  background: var(--brand-soft, #eef0ff);
+}
+.tree-toggle {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+  flex: none;
+}
+.tree-toggle:disabled {
+  cursor: default;
+}
+.tree-name {
+  border: 0;
+  background: none;
+  font: 600 14px var(--font);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 4px 2px;
+  display: inline-flex;
+  gap: 8px;
+  align-items: baseline;
+  text-align: left;
+}
+.tree-kind {
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.tree-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.tree-actions {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.crumb-path {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+}
+.crumb-path .sep {
+  color: var(--ink-2);
+  margin-right: 4px;
+}
+.crumb-path .last {
+  font-weight: 700;
+}
+.picked {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-height: 42px;
+}
+.inline-form {
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  margin: 10px 0 14px;
+  background: var(--bg);
+}
+.span-2 {
+  grid-column: 1 / -1;
+}
+.pick-list {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pick-list li > div:first-child {
+  flex: 1;
+}
+.pick-list li {
+  display: list-item;
+}
+.pick-list li > * {
+  vertical-align: middle;
+}
+.pick-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.pick-list li > div,
+.pick-list li > span {
+  display: inline-flex;
+}
+.pick-list li > div {
+  flex-direction: column;
+  width: calc(100% - 140px);
+}
+.error-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.tree-name {
+  white-space: nowrap;
+}
+.tree-count {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.admin-split > * {
+  min-width: 0;
+}
+/* grid/stack children may shrink; wide tables then scroll inside .table-wrap instead of stretching the card */
+.stack > *,
+.card {
+  min-width: 0;
+}
+.admin-split .ptable {
+  min-width: 0;
+}

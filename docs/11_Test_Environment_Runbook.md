@@ -261,6 +261,15 @@ Base URL: `https://mohitconcert11.fyre.ibm.com:8443/api/v1` (curl needs `-k` for
 | GET | `/admin/catalog/templates?status=DRAFT\|PUBLISHED\|RETIRED` | curator, admin | all template versions |
 | POST | `/admin/catalog/templates/{code}/versions/{v}/publish` | curator, admin | publish a version (retires the previous one) |
 | POST | `/admin/catalog/templates/{code}/versions/{v}/retire` | curator, admin | retire a version |
+| GET | `/admin/catalog/tree` | curator, admin | category tree with display paths and counts |
+| POST / PATCH | `/admin/catalog/categories[/{code}]` | curator, admin | add a category under a parent (`{parentCode,name,kind}`) / rename |
+| GET | `/admin/catalog/activities?q=` · `/admin/catalog/profiles` | curator, admin | latest version of every activity / profile with status and placement |
+| POST | `/admin/catalog/activities` · `/admin/catalog/templates` | curator, admin | create a DRAFT (codes are generated from the name) |
+| GET / PUT / DELETE | `/admin/catalog/{activities\|templates}/{code}/versions/{v}` | curator, admin | read any version · update or delete a DRAFT |
+| POST | `/admin/catalog/{activities\|templates}/{code}/drafts` | curator, admin | start editing: copies the latest version into a new draft |
+| POST | `/admin/catalog/activities/{code}/versions/{v}/publish` · `/retire` | curator, admin | publish (published profiles using it get a new version automatically) / retire |
+
+Web: **Admin → Catalog tree / Profiles / Activities**. Place items by name in the tree (e.g. Sports › Racquet Sports › Table Tennis); codes are never shown. A field's kind of answer and unit are fixed once published (`422 immutable-field`). Every change is written to `catalog_audit`.
 
 Examples:
 

@@ -4,6 +4,7 @@ import { AdminController } from './api/admin.controller.js';
 import { CatalogController } from './api/catalog.controller.js';
 import { SearchController } from './api/search.controller.js';
 import { CatalogAdminService } from './application/catalog-admin.service.js';
+import { CatalogEditorService } from './application/catalog-editor.service.js';
 import { CatalogQueryService } from './application/catalog-query.service.js';
 import { CatalogSearchService } from './application/catalog-search.service.js';
 import { SeedOnStart } from './application/seed.provider.js';
@@ -26,7 +27,7 @@ export class AppModule {
         }),
       ],
       controllers: [CatalogController, SearchController, AdminController],
-      providers: [CatalogQueryService, CatalogSearchService, CatalogAdminService, SeedOnStart],
+      providers: [CatalogQueryService, CatalogSearchService, CatalogAdminService, CatalogEditorService, SeedOnStart],
     };
   }
 }

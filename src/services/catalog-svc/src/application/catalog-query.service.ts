@@ -228,9 +228,8 @@ export class CatalogQueryService {
    * Assembles activity snapshots with their effective parameters and metrics:
    * parameter-set members first (in set order), then the activity's own items (same key overrides).
    */
-  private async loadActivities(
-    links: { activityId: string; targets: Record<string, unknown> }[],
-  ): Promise<ActivitySnapshot[]> {
+  /** Also used by the catalog editor for draft versions (uncached). */
+  async loadActivities(links: { activityId: string; targets: Record<string, unknown> }[]): Promise<ActivitySnapshot[]> {
     if (links.length === 0) return [];
     const ids = links.map((l) => l.activityId);
     const acts = await this.db.selectFrom('activityDefinition').selectAll().where('id', 'in', ids).execute();

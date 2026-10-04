@@ -258,6 +258,18 @@ export class CatalogSeeder {
     return ids;
   }
 
+  /** True once any version of the code was created in the Admin Console; seeding then leaves it alone. */
+  private async adminOwned(trx: Trx, table: 'activityDefinition' | 'profileTemplate', code: string) {
+    const row = await trx
+      .selectFrom(table)
+      .select('id')
+      .where('code', '=', code)
+      .where('source', '=', 'ADMIN')
+      .limit(1)
+      .executeTakeFirst();
+    return row !== undefined;
+  }
+
   private async latest(trx: Trx, table: 'parameterSet' | 'activityDefinition' | 'profileTemplate', code: string) {
     return trx
       .selectFrom(table)
@@ -299,6 +311,11 @@ export class CatalogSeeder {
     for (const a of acts) {
       const hash = sha256(JSON.stringify({ a, psets: a.parameterSets.map((c) => psets.get(c)?.hash) }));
       const prev = await this.latest(trx, 'activityDefinition', a.code);
+      if (await this.adminOwned(trx, 'activityDefinition', a.code)) {
+        // Edited in the Admin Console: the seed file no longer owns it.
+        if (prev) out.set(a.code, { id: prev.id, version: prev.version, hash: prev.contentHash });
+        continue;
+      }
       if (prev?.contentHash === hash) {
         out.set(a.code, { id: prev.id, version: prev.version, hash });
         continue;
@@ -365,7 +382,7 @@ export class CatalogSeeder {
     for (const t of tpls) {
       const hash = sha256(JSON.stringify({ t, acts: t.activities.map((x) => acts.get(x.activity)?.hash) }));
       const prev = await this.latest(trx, 'profileTemplate', t.code);
-      if (prev?.contentHash === hash) continue;
+      if (prev?.contentHash === hash || (await this.adminOwned(trx, 'profileTemplate', t.code))) continue;
       const id = newId();
       const version = (prev?.version ?? 0) + 1;
       if (prev) {
