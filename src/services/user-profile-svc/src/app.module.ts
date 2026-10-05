@@ -1,6 +1,8 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { PlatformModule } from '@trainme/service-kit';
+import { CoachingController } from './api/coaching.controller.js';
 import { ProfileController } from './api/profile.controller.js';
+import { CoachingService } from './application/coaching.service.js';
 import { ProfileService } from './application/profile.service.js';
 import type { ProfileConfig } from './config/profile.config.js';
 
@@ -20,8 +22,8 @@ export class AppModule {
           config,
         }),
       ],
-      controllers: [ProfileController],
-      providers: [ProfileService],
+      controllers: [ProfileController, CoachingController],
+      providers: [ProfileService, CoachingService],
     };
   }
 }

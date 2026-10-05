@@ -1,7 +1,8 @@
+import type { Logger } from '@trainme/observability';
 import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { JsonCache } from '@trainme/cache';
-import { newId, type Kysely, type Transaction } from '@trainme/db';
+import { newId, sql, type Kysely, type Transaction } from '@trainme/db';
 import { ProblemError, type FieldError } from '@trainme/errors';
 import { EVENT_TYPES, TOPICS, type TemplatePublishedPayload } from '@trainme/events';
 import type { OutboxWriter } from '@trainme/kafka';
@@ -13,7 +14,7 @@ import {
   type ParameterDefinition,
   type RecordingMode,
 } from '@trainme/schema';
-import { CACHE, DATABASE, OUTBOX } from '@trainme/service-kit';
+import { CACHE, DATABASE, LOGGER, OUTBOX } from '@trainme/service-kit';
 import type { CatalogDatabase } from '../infrastructure/catalog.database.js';
 import { CatalogAdminService } from './catalog-admin.service.js';
 import { CACHE_KEYS, CatalogQueryService } from './catalog-query.service.js';
@@ -80,6 +81,7 @@ export const slug = (name: string) =>
 @Injectable()
 export class CatalogEditorService {
   constructor(
+    @Inject(LOGGER) private readonly log: Logger,
     @Inject(DATABASE) private readonly db: Kysely<CatalogDatabase>,
     @Inject(CACHE) private readonly cache: JsonCache,
     @Inject(OUTBOX) private readonly outbox: OutboxWriter,
@@ -249,6 +251,7 @@ export class CatalogEditorService {
       const cats = await this.categories(trx);
       const cat = cats.find((c) => c.code === input.categoryCode);
       if (!cat) throw ProblemError.validation([field('/body/categoryCode', 'unknown', 'Choose where it belongs')]);
+      await this.assertUniqueName(trx, 'activity', input.name, cat);
       const prefix = pathOf(cat, cats).find((c) => c.kind === 'SPORT')?.code ?? cat.code;
       const taken = await trx.selectFrom('activityDefinition').select('code').distinct().execute();
       const code = uniqueCode(`${prefix}.${slug(input.name)}`, new Set(taken.map((t) => t.code)));
@@ -284,6 +287,13 @@ export class CatalogEditorService {
     await this.db.transaction().execute(async (trx) => {
       const row = await this.lockDraft(trx, 'activityDefinition', code, version);
       await this.checkHistoryCompatible(trx, code, input.parameters);
+      await this.assertUniqueName(
+        trx,
+        'activity',
+        input.name,
+        this.requireCategory(await this.categories(trx), input.categoryCode),
+        code,
+      );
       await trx.deleteFrom('activityDefinition').where('id', '=', row.id).execute(); // cascades fields and stats
       await this.insertActivity(trx, code, version, input, await this.categories(trx));
       await this.audit(trx, actorId, 'UPDATE', 'ACTIVITY', code, { version });
@@ -452,6 +462,7 @@ export class CatalogEditorService {
     return this.db.transaction().execute(async (trx) => {
       const cats = await this.categories(trx);
       const cat = this.requireCategory(cats, input.categoryCode);
+      await this.assertUniqueName(trx, 'profile', input.name, cat);
       const prefix = pathOf(cat, cats).find((c) => c.kind === 'SPORT')?.code ?? cat.code;
       const taken = await trx.selectFrom('profileTemplate').select('code').distinct().execute();
       const code = uniqueCode(`${prefix}.${slug(input.name)}`, new Set(taken.map((t) => t.code)));
@@ -491,6 +502,7 @@ export class CatalogEditorService {
     await this.db.transaction().execute(async (trx) => {
       const row = await this.lockDraft(trx, 'profileTemplate', code, version);
       const cat = this.requireCategory(await this.categories(trx), input.categoryCode);
+      await this.assertUniqueName(trx, 'profile', input.name, cat, code);
       await trx.deleteFrom('profileTemplate').where('id', '=', row.id).execute(); // cascades its activity links
       await this.insertTemplate(trx, code, version, input, cat.id, 'DRAFT');
       await this.audit(trx, actorId, 'UPDATE', 'TEMPLATE', code, { version });
@@ -523,6 +535,10 @@ export class CatalogEditorService {
       .where('t.status', '=', 'DRAFT')
       .where('a.status', '=', 'DRAFT')
       .execute();
+    this.log.debug(
+      { code, version, draftActivities: drafts.map((d) => d.code), publishActivities },
+      'publishing profile',
+    );
     if (drafts.length && !publishActivities)
       throw ProblemError.conflict(
         'activities-not-published',
@@ -821,6 +837,41 @@ export class CatalogEditorService {
     if (errors.length) throw ProblemError.validation(errors);
   }
 
+  /**
+   * One name per place: a second "Swimming" profile under Sports would confuse admins and users alike.
+   * Retired items do not count. The 409 carries the existing item so the UI can offer to open it.
+   */
+  private async assertUniqueName(
+    trx: Trx,
+    what: 'profile' | 'activity',
+    name: string,
+    cat: CategoryRow,
+    exceptCode?: string,
+  ) {
+    const rows =
+      what === 'profile'
+        ? await trx
+            .selectFrom('profileTemplate')
+            .select(['code', 'version', 'status'])
+            .where('categoryId', '=', cat.id)
+            .where(sql`lower(name)`, '=', name.trim().toLowerCase())
+            .execute()
+        : await trx
+            .selectFrom('activityDefinition')
+            .select(['code', 'version', 'status'])
+            .where(sql<boolean>`${cat.code} = ANY(category_codes)`)
+            .where(sql`lower(name)`, '=', name.trim().toLowerCase())
+            .execute();
+    const clash = latestPerCode(rows).find((r) => r.code !== exceptCode && r.status !== 'RETIRED');
+    this.log.debug({ what, name, category: cat.code, clash: clash?.code ?? null }, 'duplicate-name check');
+    if (clash)
+      throw ProblemError.conflict(
+        'duplicate-name',
+        `A ${what} called “${name.trim()}” already exists in ${cat.name}${clash.status === 'DRAFT' ? ' (as a draft)' : ''}`,
+        { existing: { code: clash.code, version: clash.version, kind: what } },
+      );
+  }
+
   private async latestPublishedIds(trx: Trx, codes: string[]) {
     const rows = await trx
       .selectFrom('activityDefinition')
@@ -879,7 +930,12 @@ export class CatalogEditorService {
     return out;
   }
 
+  /** Every catalog change goes through here: audit row + one info log line (who, what, which item). */
   private audit(trx: Trx, actorId: string, action: string, entityType: string, entityCode: string, details: unknown) {
+    this.log.info(
+      { action, entityType, entityCode, actorId, details },
+      `catalog ${entityType.toLowerCase()} ${action.toLowerCase()}`,
+    );
     return trx
       .insertInto('catalogAudit')
       .values({ id: newId(), actorId, action, entityType, entityCode, details: JSON.stringify(details) })

@@ -6,6 +6,8 @@ export const baseConfigSchema = z.object({
   SERVICE_NAME: z.string().min(1),
   PORT: z.coerce.number().int().positive().default(8080),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  /** Folder for daily log files; empty = stdout only (Kubernetes). */
+  LOG_DIR: z.string().optional(),
 });
 
 /** Settings shared by every backend service (names fixed by docs/10 §7). */
@@ -14,6 +16,8 @@ export const platformConfigSchema = z.object({
   SERVICE_NAME: z.string().min(1),
   PORT: z.coerce.number().int().positive().default(8080),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  /** Folder for daily log files; empty = stdout only (Kubernetes). */
+  LOG_DIR: z.string().optional(),
   DATABASE_URL: z.string().min(1),
   DB_POOL_SIZE: z.coerce.number().int().positive().default(10),
   REDIS_URL: z.string().min(1),

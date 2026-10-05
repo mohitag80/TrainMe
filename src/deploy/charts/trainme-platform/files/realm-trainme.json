@@ -305,11 +305,49 @@
       "emailVerified": true,
       "enabled": true,
       "firstName": "Coach",
-      "lastName": "Curator",
+      "lastName": "Carter",
       "attributes": {
         "plan": ["PRO"]
       },
-      "realmRoles": ["default-roles-trainme", "curator"],
+      "realmRoles": ["default-roles-trainme"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "coach2@trainme.test",
+      "email": "coach2@trainme.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Kiran",
+      "lastName": "Rao",
+      "attributes": {
+        "plan": ["PRO"]
+      },
+      "realmRoles": ["default-roles-trainme"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "coach3@trainme.test",
+      "email": "coach3@trainme.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Dev",
+      "lastName": "Mehta",
+      "attributes": {
+        "plan": ["FREE"]
+      },
+      "realmRoles": ["default-roles-trainme"],
       "credentials": [
         {
           "type": "password",

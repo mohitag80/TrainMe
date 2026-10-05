@@ -17,6 +17,7 @@ export interface SessionFactTable {
   schemaVersion: number;
   entryCount: number;
   stats: Json<SessionStats>;
+  trainerId: string | null;
   updatedAt: Defaulted<Date>;
 }
 

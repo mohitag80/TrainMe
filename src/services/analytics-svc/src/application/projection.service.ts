@@ -70,6 +70,7 @@ export class ProjectionService {
         schemaVersion: s.schemaVersion,
         entryCount: s.entryCount,
         stats: JSON.stringify(stats),
+        trainerId: s.trainerId ?? null,
       })
       .onConflict((oc) =>
         oc.columns(['userId', 'sessionId']).doUpdateSet((eb) => ({
@@ -79,6 +80,7 @@ export class ProjectionService {
           schemaVersion: eb.ref('excluded.schemaVersion'),
           entryCount: eb.ref('excluded.entryCount'),
           stats: eb.ref('excluded.stats'),
+          trainerId: eb.ref('excluded.trainerId'),
           updatedAt: new Date(),
         })),
       )
@@ -110,6 +112,18 @@ export class ProjectionService {
     await this.updatePersonalRecords(trx, s, stats, schema);
     await this.updateStreak(trx, s.userId, s.trackerId, localDate(new Date(), s.timezone));
     await this.cache.invalidateGroup(chartGroupKey(s.userId, s.trackerId));
+    this.log.info(
+      {
+        sessionId: s.sessionId,
+        userId: s.userId,
+        trackerId: s.trackerId,
+        sessionDate: s.sessionDate,
+        entries: s.entries.length,
+        rolledUpDays: [...dates],
+        replaced: !!previous,
+      },
+      previous ? 'session stats recalculated' : 'session stats calculated',
+    );
   }
 
   /** record.session.deleted: remove its facts and rebuild that day's rollups. */
@@ -120,13 +134,20 @@ export class ProjectionService {
       .where('sessionId', '=', ref.sessionId)
       .returning(['sessionDate', 'trackerId'])
       .executeTakeFirst();
-    if (!fact) return;
+    if (!fact) {
+      this.log.debug({ sessionId: ref.sessionId }, 'deleted session had no stats');
+      return;
+    }
     await trx
       .deleteFrom('sessionMetric')
       .where('userId', '=', ref.userId)
       .where('sessionId', '=', ref.sessionId)
       .execute();
     await this.rebuildRollups(trx, ref.userId, fact.trackerId, fact.sessionDate);
+    this.log.info(
+      { sessionId: ref.sessionId, userId: ref.userId, trackerId: fact.trackerId, sessionDate: fact.sessionDate },
+      'session stats removed',
+    );
     // No time zone on delete events: a +1 day tolerance keeps users east of UTC from losing today.
     await this.updateStreak(trx, ref.userId, fact.trackerId, addDays(localDate(new Date()), 1));
     await this.cache.invalidateGroup(chartGroupKey(ref.userId, fact.trackerId));
@@ -138,6 +159,7 @@ export class ProjectionService {
       await trx.deleteFrom(table).where('userId', '=', userId).where('trackerId', '=', trackerId).execute();
     }
     await this.cache.invalidateGroup(chartGroupKey(userId, trackerId));
+    this.log.info({ userId, trackerId }, 'tracker stats removed');
   }
 
   /** user.deleted (erasure saga): all of the user's analytics rows. */
@@ -145,6 +167,7 @@ export class ProjectionService {
     for (const table of ['sessionFact', 'metricRollup', 'sessionMetric', 'personalRecord', 'streak'] as const) {
       await trx.deleteFrom(table).where('userId', '=', userId).execute();
     }
+    this.log.info({ userId }, 'user stats erased');
   }
 
   /** DAY from that day's session facts, then the enclosing WEEK and MONTH from DAY rows. */
@@ -310,6 +333,17 @@ export class ProjectionService {
             })),
           )
           .execute();
+        this.log.info(
+          {
+            userId: s.userId,
+            trackerId: s.trackerId,
+            activityCode,
+            metricKey,
+            value: m.value,
+            previous: prev?.bestValue ?? null,
+          },
+          'personal best',
+        );
         await this.outbox.enqueue<PrAchievedPayload>(trx, TOPICS.analytics, {
           type: EVENT_TYPES.prAchieved,
           userId: s.userId,

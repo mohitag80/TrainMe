@@ -5,10 +5,12 @@ import { SessionController } from './api/session.controller.js';
 import { AutoCloseJob } from './application/auto-close.job.js';
 import { CheckpointService } from './application/checkpoint.service.js';
 import { CleanupConsumer } from './application/cleanup.consumer.js';
+import { FeedbackService } from './application/feedback.service.js';
 import { HistorySearchService } from './application/history-search.service.js';
 import { SessionEvents } from './application/session-events.js';
 import { SessionService } from './application/session.service.js';
 import type { RecordsConfig } from './config/records.config.js';
+import { ProfileClient } from './infrastructure/profile.client.js';
 import { TrackerClient } from './infrastructure/tracker.client.js';
 
 @Module({})
@@ -36,6 +38,8 @@ export class AppModule {
         SessionEvents,
         AutoCloseJob,
         TrackerClient,
+        ProfileClient,
+        FeedbackService,
         CleanupConsumer,
       ],
     };

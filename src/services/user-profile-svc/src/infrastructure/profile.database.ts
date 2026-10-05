@@ -22,6 +22,9 @@ export interface UserProfileTable {
   weekStart: 'MON' | 'SUN';
   interests: string[];
   isOnboarded: boolean;
+  isTrainer: Defaulted<boolean>;
+  trainerBio: string | null;
+  trainerSpecialties: Defaulted<string[]>;
   rowVersion: number;
   createdAt: ColumnType<Date, never, never>;
   updatedAt: Defaulted<Date>;
@@ -48,8 +51,23 @@ export interface DataRequestTable {
   details: Json<Record<string, unknown>>;
 }
 
+export type ConnectionStatus = 'PENDING' | 'ACTIVE' | 'DECLINED' | 'ENDED';
+
+export interface TrainerConnectionTable {
+  id: string;
+  trainerId: string;
+  traineeId: string;
+  status: ConnectionStatus;
+  requestedBy: string;
+  createdAt: ColumnType<Date, never, never>;
+  respondedAt: Date | null;
+  endedAt: Date | null;
+  endedBy: string | null;
+}
+
 export interface ProfileDatabase {
   userProfile: UserProfileTable;
+  trainerConnection: TrainerConnectionTable;
   userDevice: UserDeviceTable;
   dataRequest: DataRequestTable;
   outboxEvent: OutboxEventTable;

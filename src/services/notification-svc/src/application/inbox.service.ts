@@ -1,8 +1,9 @@
+import type { Logger } from '@trainme/observability';
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuthUser } from '@trainme/auth';
 import { newId, type Kysely } from '@trainme/db';
 import { ProblemError } from '@trainme/errors';
-import { DATABASE } from '@trainme/service-kit';
+import { DATABASE, LOGGER } from '@trainme/service-kit';
 import { nextFireAt } from '../domain/schedule.js';
 import type { Channel, NotificationDatabase } from '../infrastructure/notification.database.js';
 
@@ -32,7 +33,10 @@ const REMINDER_COLUMNS = [
 /** Reminders, inbox and preferences of the caller (FR-NTF-01/04, FR-PRF-05). */
 @Injectable()
 export class InboxService {
-  constructor(@Inject(DATABASE) private readonly db: Kysely<NotificationDatabase>) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Kysely<NotificationDatabase>,
+    @Inject(LOGGER) private readonly log: Logger,
+  ) {}
 
   reminders(user: AuthUser) {
     return this.db
@@ -65,7 +69,14 @@ export class InboxService {
         nextFireAt: nextFireAt(r.daysOfWeek, r.timeOfDay, r.timezone),
       })
       .returning([...REMINDER_COLUMNS])
-      .executeTakeFirstOrThrow();
+      .executeTakeFirstOrThrow()
+      .then((row) => {
+        this.log.info(
+          { userId: user.id, reminderId: row.id, days: r.daysOfWeek, time: r.timeOfDay, channel: r.channel },
+          'reminder created',
+        );
+        return row;
+      });
   }
 
   async updateReminder(user: AuthUser, id: string, r: ReminderInput) {
@@ -87,6 +98,7 @@ export class InboxService {
       .returning([...REMINDER_COLUMNS])
       .executeTakeFirst();
     if (!row) throw ProblemError.notFound(`Reminder ${id}`);
+    this.log.info({ userId: user.id, reminderId: id, enabled: row.isEnabled }, 'reminder updated');
     return row;
   }
 
@@ -97,6 +109,7 @@ export class InboxService {
       .where('userId', '=', user.id)
       .executeTakeFirst();
     if (r.numDeletedRows === 0n) throw ProblemError.notFound(`Reminder ${id}`);
+    this.log.info({ userId: user.id, reminderId: id }, 'reminder deleted');
   }
 
   /** In-app inbox, newest first, keyset pagination on (created_at, id). */
@@ -144,6 +157,10 @@ export class InboxService {
       .where('readAt', 'is', null);
     if (id) q = q.where('id', '=', id);
     const r = await q.executeTakeFirst();
+    this.log.debug(
+      { userId: user.id, notificationId: id ?? 'all', updated: Number(r.numUpdatedRows) },
+      'notifications marked read',
+    );
     return { updated: Number(r.numUpdatedRows) };
   }
 
@@ -180,6 +197,10 @@ export class InboxService {
       .values({ userId: user.id, ...p })
       .onConflict((oc) => oc.column('userId').doUpdateSet({ ...p, updatedAt: new Date() }))
       .returningAll()
-      .executeTakeFirstOrThrow();
+      .executeTakeFirstOrThrow()
+      .then((row) => {
+        this.log.info({ userId: user.id, ...p }, 'notification preferences changed');
+        return row;
+      });
   }
 }

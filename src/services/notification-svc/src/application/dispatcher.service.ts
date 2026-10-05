@@ -35,7 +35,10 @@ export class DispatcherService {
       .select(['email', 'timezone', 'isDeleted'])
       .where('userId', '=', n.userId)
       .executeTakeFirst();
-    if (contact?.isDeleted) return;
+    if (contact?.isDeleted) {
+      this.log.debug({ userId: n.userId, template: n.template }, 'notification skipped – account deleted');
+      return;
+    }
     const pref = await db
       .selectFrom('notificationPreference')
       .selectAll()
@@ -71,6 +74,10 @@ export class DispatcherService {
           }
         }
       }
+      this.log.info(
+        { userId: n.userId, template: n.template, channel, status, reason: error },
+        'notification ' + status.toLowerCase(),
+      );
       await db
         .insertInto('notification')
         .values({

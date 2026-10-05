@@ -11,6 +11,35 @@ export interface UserProfilePayload {
   unitPreferences: Record<string, UnitSystemChoice>;
 }
 
+/** user.connection.*: trainer ↔ trainee link (FR-COA-02..04). Names let notifications avoid a lookup. */
+export interface ConnectionPayload {
+  connectionId: string;
+  trainerId: string;
+  trainerName: string;
+  traineeId: string;
+  traineeName: string;
+  status: 'PENDING' | 'ACTIVE' | 'DECLINED' | 'ENDED';
+  /** Who acted (requested, accepted, declined or ended). */
+  actorId: string;
+}
+
+export interface TrainerPayload {
+  userId: string;
+  isTrainer: boolean;
+}
+
+/** record.feedback.added: a trainer's note on a session or one entry (FR-COA-09). */
+export interface FeedbackPayload {
+  feedbackId: string;
+  sessionId: string;
+  sessionName: string;
+  sessionDate: string;
+  traineeId: string;
+  authorId: string;
+  clientEntryId: string | null;
+  excerpt: string;
+}
+
 export interface UserDeletedPayload {
   userId: string;
   requestedAt: string;
@@ -60,6 +89,8 @@ export interface SessionSnapshotPayload {
   timezone: string;
   schemaVersion: number;
   status: 'IN_PROGRESS' | 'COMPLETED' | 'DISCARDED';
+  /** Optional trainer assigned at start (v1.4). */
+  trainerId?: string | null;
   isAutoClosed: boolean;
   startedAt: string;
   endedAt: string | null;
@@ -74,6 +105,7 @@ export interface SessionRefPayload {
   trackerId: string;
   name: string;
   sessionDate: string;
+  trainerId?: string | null;
 }
 
 export interface PrAchievedPayload {

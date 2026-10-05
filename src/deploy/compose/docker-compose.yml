@@ -8,7 +8,11 @@ x-service: &service
     context: ../../..
     dockerfile: src/deploy/docker/service.Dockerfile
   restart: unless-stopped
+  # Daily log files per service under ./logs/<service>/ (see LOG_DIR); :z relabels the folder for SELinux (RHEL).
+  volumes:
+    - ./logs:/var/log/trainme:z
   depends_on:
+    log-dir-init: { condition: service_completed_successfully }
     postgres: { condition: service_healthy }
     redpanda-init: { condition: service_completed_successfully }
     valkey: { condition: service_healthy }
@@ -26,6 +30,7 @@ x-service: &service
 x-service-env: &service-env
   NODE_ENV: production
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  LOG_DIR: ${LOG_DIR-/var/log/trainme}
   RUN_MIGRATIONS: 'true'
   KAFKA_BROKERS: redpanda:9092
   REDIS_URL: redis://valkey:6379
@@ -43,6 +48,14 @@ x-service-env: &service-env
   SUBSCRIPTION_SVC_URL: http://subscription-svc:8080
 
 services:
+  # Makes ./logs writable for the services, which run as the non-root "node" user (uid 1000).
+  log-dir-init:
+    image: alpine:3.22
+    command: ['sh', '-c', 'mkdir -p /logs && chown -R 1000:1000 /logs && chmod 0775 /logs']
+    volumes:
+      - ./logs:/logs:z
+    restart: 'no'
+
   # ---------------------------------------------------------------- data
   postgres:
     build: ../docker/postgres
@@ -305,7 +318,10 @@ services:
     build: { context: ../../.., dockerfile: src/deploy/docker/web.Dockerfile }
     image: trainme-web:local
     restart: unless-stopped
+    volumes:
+      - ./logs:/var/log/trainme:z
     depends_on:
+      log-dir-init: { condition: service_completed_successfully }
       valkey: { condition: service_healthy }
       keycloak: { condition: service_healthy }
     environment:
@@ -315,6 +331,8 @@ services:
       OIDC_INTERNAL_URL: http://keycloak:8080/auth/realms/trainme
       OIDC_CLIENT_ID: trainme-web
       REDIS_URL: redis://valkey:6379
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_DIR: ${LOG_DIR-/var/log/trainme}
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/login']
       interval: 10s

@@ -104,7 +104,13 @@ export function ActivityEditor({
   const [editing, setEditing] = useState<{ index: number | null; skill?: boolean } | null>(null);
   const [addingStat, setAddingStat] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string; list?: string[] }>();
+  const [msg, setMsg] = useState<{
+    tone: 'ok' | 'bad';
+    text: string;
+    list?: string[];
+    link?: string;
+    linkText?: string;
+  }>();
 
   useEffect(() => {
     const d = doc.data;
@@ -144,6 +150,20 @@ export function ActivityEditor({
     metrics: form.metrics,
   });
   const fail = (e: unknown) => {
+    if (e instanceof ApiError && e.problem.type?.endsWith('/duplicate-name')) {
+      const ex = e.problem.existing as { code: string; version: number; kind: 'profile' | 'activity' } | undefined;
+      setMsg({
+        tone: 'bad',
+        text: `${e.message}. Open that one instead, or choose another name.`,
+        ...(ex
+          ? {
+              link: `/admin/${ex.kind === 'profile' ? 'profiles' : 'activities'}/${encodeURIComponent(ex.code)}/${ex.version}`,
+              linkText: 'Open it →',
+            }
+          : {}),
+      });
+      return;
+    }
     const errors = e instanceof ApiError ? (e.problem.errors ?? []).map((x) => x.message) : [];
     setMsg({ tone: 'bad', text: errors.length ? 'Please fix these before saving:' : errorText(e), list: errors });
   };
@@ -294,30 +314,58 @@ export function ActivityEditor({
                   Delete draft
                 </button>
               )}
-              <button className="btn" disabled={busy} onClick={save}>
-                Save draft
-              </button>
-              <button className="btn btn-primary" disabled={busy || params.length === 0} onClick={publish}>
-                Publish
-              </button>
+              {forProfile ? (
+                <>
+                  <button
+                    className="btn btn-ghost"
+                    disabled={busy}
+                    onClick={() =>
+                      router.push(`/admin/profiles/${encodeURIComponent(forProfile.code)}/${forProfile.version}`)
+                    }
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    disabled={busy || params.length === 0}
+                    title={params.length === 0 ? 'Add at least one field first' : undefined}
+                    onClick={async () => {
+                      const s = await save();
+                      if (s) backToProfile(s.code);
+                    }}
+                  >
+                    Save and add to “{forProfile.name}”
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="btn" disabled={busy} onClick={save}>
+                    Save draft
+                  </button>
+                  <button className="btn btn-primary" disabled={busy || params.length === 0} onClick={publish}>
+                    Publish
+                  </button>
+                </>
+              )}
             </>
           )
         }
       />
       {forProfile && (
         <Notice tone="warn">
-          Creating this for the profile “{forProfile.name}”. When you publish, it is added to that profile and you go
-          back there.{' '}
-          {code && (
-            <button className="btn btn-sm" onClick={() => backToProfile(code)}>
-              Add to “{forProfile.name}” and go back
-            </button>
-          )}
+          New activity for the profile “{forProfile.name}”. Add its fields, then click <b>Save and add</b> – it is
+          published together with the profile when you publish “{forProfile.name}”.
         </Notice>
       )}
       {msg && (
         <Notice tone={msg.tone}>
           {msg.text}
+          {msg.link && (
+            <>
+              {' '}
+              <Link href={msg.link}>{msg.linkText ?? 'Open →'}</Link>
+            </>
+          )}
           {msg.list && msg.list.length > 0 && (
             <ul className="error-list">
               {msg.list.map((m, i) => (

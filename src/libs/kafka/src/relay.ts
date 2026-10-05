@@ -99,6 +99,11 @@ export class OutboxRelay {
         )
         .execute();
       for (const [topic, msgs] of byTopic) outboxPublished.inc({ topic }, msgs.length);
+      const types: Record<string, number> = {};
+      for (const r of rows) types[r.eventType] = (types[r.eventType] ?? 0) + 1;
+      this.log.info({ count: rows.length, types }, 'events published');
+      for (const r of rows)
+        this.log.debug({ eventId: r.id, type: r.eventType, topic: r.topic, key: r.messageKey }, 'event published');
       return rows.length;
     });
   }

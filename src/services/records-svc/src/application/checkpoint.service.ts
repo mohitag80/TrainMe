@@ -1,8 +1,9 @@
+import type { Logger } from '@trainme/observability';
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuthUser } from '@trainme/auth';
 import { newId, sql, type Kysely } from '@trainme/db';
 import { ProblemError, type FieldError } from '@trainme/errors';
-import { DATABASE } from '@trainme/service-kit';
+import { DATABASE, LOGGER } from '@trainme/service-kit';
 import type { RecordsDatabase } from '../infrastructure/records.database.js';
 import { TrackerClient } from '../infrastructure/tracker.client.js';
 import { SessionEvents } from './session-events.js';
@@ -34,6 +35,7 @@ export interface BatchInput {
 @Injectable()
 export class CheckpointService {
   constructor(
+    @Inject(LOGGER) private readonly log: Logger,
     @Inject(DATABASE) private readonly db: Kysely<RecordsDatabase>,
     private readonly sessions: SessionService,
     private readonly trackers: TrackerClient,
@@ -43,13 +45,18 @@ export class CheckpointService {
   async apply(user: AuthUser, sessionId: string, ifMatch: number | undefined, batch: BatchInput) {
     if (batch.entries.length > MAX_ENTRIES_PER_BATCH)
       throw ProblemError.badRequest('batch-too-large', `At most ${MAX_ENTRIES_PER_BATCH} entries per batch`);
-    const pre = await this.sessions.loadOwned(this.db, user, sessionId);
+    const { session: pre, role } = await this.sessions.loadAccessible(this.db, user, sessionId);
     if (batch.schemaVersion !== pre.schemaVersion) {
       throw ProblemError.conflict('schema-version-mismatch', `Session is pinned to schema v${pre.schemaVersion}`, {
         schemaVersion: pre.schemaVersion,
       });
     }
-    const validator = await this.trackers.validator(pre.trackerId, pre.schemaVersion, user);
+    // A trainer cannot read the trainee's tracker: the pinned schema is fetched with the service token instead.
+    const validator = await this.trackers.validator(
+      pre.trackerId,
+      pre.schemaVersion,
+      role === 'OWNER' ? user : undefined,
+    );
 
     const rejected: { clientEntryId: string; errors: FieldError[] }[] = [];
     const valid: EntryInput[] = [];
@@ -59,8 +66,26 @@ export class CheckpointService {
       else valid.push(e);
     }
 
+    this.log.debug(
+      {
+        sessionId,
+        userId: user.id,
+        batchSeq: batch.batchSeq,
+        entries: batch.entries.length,
+        deletes: batch.deletes.length,
+        rejected: rejected.length,
+      },
+      'checkpoint received',
+    );
+    if (rejected.length)
+      this.log.debug(
+        { sessionId, rejected: rejected.map((r) => ({ id: r.clientEntryId, errors: r.errors.map((e) => e.pointer) })) },
+        'entries rejected',
+      );
     return this.db.transaction().execute(async (trx) => {
-      const s = await this.sessions.lockOwned(trx, user, sessionId, undefined);
+      const s = await this.sessions.lockForRecording(trx, user, sessionId);
+      if (role === 'TRAINER' && s.status !== 'IN_PROGRESS')
+        throw ProblemError.forbidden('Trainers record only while the session is live');
       if (s.status === 'DISCARDED') throw ProblemError.conflict('not-in-progress', 'Session was discarded');
       if (s.status === 'COMPLETED' && ifMatch === undefined) {
         throw ProblemError.conflict(
@@ -77,7 +102,7 @@ export class CheckpointService {
           .values(
             valid.map((e) => ({
               id: newId(),
-              userId: user.id,
+              userId: s.userId, // entries always belong to the trainee, also when the trainer logs them
               sessionId,
               sessionDate: s.sessionDate,
               clientEntryId: e.clientEntryId,
@@ -86,6 +111,7 @@ export class CheckpointService {
               groupNo: e.group ?? null,
               recordedAt: new Date(e.recordedAt),
               values: JSON.stringify(e.values),
+              recordedBy: user.id,
               rowVersion: e.rowVersion ?? 1,
               deletedAt: null,
             })),
@@ -145,10 +171,25 @@ export class CheckpointService {
         .where('sessionDate', '=', s.sessionDate)
         .execute();
       if (s.status === 'COMPLETED') {
-        const updated = await this.sessions.loadOwned(trx, user, sessionId);
+        const { session: updated } = await this.sessions.loadAccessible(trx, user, sessionId);
         await this.events.updated(trx, updated);
       }
-      return { acceptedThrough: batch.batchSeq, entryCount, replay: batch.batchSeq <= s.lastBatchSeq, rejected };
+      const replay = batch.batchSeq <= s.lastBatchSeq;
+      this.log.info(
+        {
+          sessionId,
+          userId: user.id,
+          role,
+          batchSeq: batch.batchSeq,
+          accepted: valid.length,
+          rejected: rejected.length,
+          deleted: batch.deletes.length,
+          entryCount,
+          replay,
+        },
+        'entries saved',
+      );
+      return { acceptedThrough: batch.batchSeq, entryCount, replay, rejected };
     });
   }
 }

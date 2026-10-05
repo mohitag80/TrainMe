@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { AuthUser } from '@trainme/auth';
 import { CurrentUser, etag, parseIfMatch, ZodPipe } from '@trainme/service-kit';
 import { CheckpointService } from '../application/checkpoint.service.js';
+import { FeedbackService } from '../application/feedback.service.js';
 import { SessionService } from '../application/session.service.js';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
@@ -20,7 +21,21 @@ const startBody = z.object({
   timezone: z.string().min(1).max(40),
   source: z.enum(['MOBILE', 'WEB', 'IMPORT']).optional(),
   onNameConflict: z.enum(['REJECT', 'SUFFIX']).default('REJECT'),
+  trainerId: z.uuid().optional(),
 });
+const coachingQuery = z.object({
+  status: z.enum(['IN_PROGRESS', 'COMPLETED']).optional(),
+  traineeId: z.uuid().optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+});
+const feedbackBody = z.object({
+  body: z.string().trim().min(1).max(2000),
+  clientEntryId: z.uuid().nullable().optional(),
+});
+const feedbackPatch = z.object({ body: z.string().trim().min(1).max(2000) });
+const fidParam = new ZodPipe(z.uuid(), '/path/feedbackId');
 const listQuery = z.object({
   date: isoDate.optional(),
   trackerId: z.uuid().optional(),
@@ -68,6 +83,7 @@ export class SessionController {
   constructor(
     private readonly sessions: SessionService,
     private readonly checkpoints: CheckpointService,
+    private readonly feedback: FeedbackService,
   ) {}
 
   @Post()
@@ -87,6 +103,54 @@ export class SessionController {
   @Get()
   list(@CurrentUser() user: AuthUser, @Query(new ZodPipe(listQuery, '/query')) q: z.infer<typeof listQuery>) {
     return this.sessions.list(user, q);
+  }
+
+  /** FR-COA-06/08: sessions where the caller is the trainer ("Live now" with status=IN_PROGRESS). */
+  @Get('coaching')
+  coaching(
+    @CurrentUser() user: AuthUser,
+    @Query(new ZodPipe(coachingQuery, '/query')) q: z.infer<typeof coachingQuery>,
+  ) {
+    return this.sessions.listCoaching(user, q);
+  }
+
+  @Get(':id/schema')
+  schema(@CurrentUser() user: AuthUser, @Param('id', idParam) id: string) {
+    return this.sessions.schema(user, id);
+  }
+
+  @Get(':id/feedback')
+  listFeedback(@CurrentUser() user: AuthUser, @Param('id', idParam) id: string) {
+    return this.feedback.list(user, id);
+  }
+
+  @Post(':id/feedback')
+  addFeedback(
+    @CurrentUser() user: AuthUser,
+    @Param('id', idParam) id: string,
+    @Body(new ZodPipe(feedbackBody, '/body')) b: z.infer<typeof feedbackBody>,
+  ) {
+    return this.feedback.add(user, id, b);
+  }
+
+  @Patch(':id/feedback/:feedbackId')
+  editFeedback(
+    @CurrentUser() user: AuthUser,
+    @Param('id', idParam) id: string,
+    @Param('feedbackId', fidParam) fid: string,
+    @Body(new ZodPipe(feedbackPatch, '/body')) b: z.infer<typeof feedbackPatch>,
+  ) {
+    return this.feedback.update(user, id, fid, b.body);
+  }
+
+  @Delete(':id/feedback/:feedbackId')
+  @HttpCode(204)
+  async removeFeedback(
+    @CurrentUser() user: AuthUser,
+    @Param('id', idParam) id: string,
+    @Param('feedbackId', fidParam) fid: string,
+  ) {
+    await this.feedback.remove(user, id, fid);
   }
 
   @Get('lookup')

@@ -1,7 +1,8 @@
 'use client';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ErrorBanner, Notice, Spinner } from '@/components/client-ui';
-import { Segmented } from '@/components/controls';
+import { Segmented, Switch } from '@/components/controls';
 import { Card, PageHeader } from '@/components/ui';
 import { api, errorText } from '@/lib/client/api';
 import { units } from '@/lib/client/format';
@@ -36,6 +37,7 @@ export default function ProfilePage() {
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
   const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string }>();
+  const router = useRouter();
   const browserZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC';
   const prefs = (form.unitPreferences ?? {}) as Record<string, System>;
   const imperialLength = prefs.length === 'IMPERIAL';
@@ -176,6 +178,17 @@ export default function ProfilePage() {
           </p>
         </Card>
       </div>
+      {profile.data.canCoach !== false && (
+        <TrainerCard
+          profile={profile.data}
+          onSaved={async (text) => {
+            setMsg({ tone: 'ok', text });
+            await profile.reload();
+            // The sidebar shows Coaching for trainers: re-render the server layout.
+            router.refresh();
+          }}
+        />
+      )}
       <div className="row gap">
         <button className="btn btn-primary btn-lg" onClick={() => save()}>
           Save changes
@@ -191,5 +204,81 @@ export default function ProfilePage() {
         </button>
       </div>
     </div>
+  );
+}
+
+/** FR-COA-01: self-service trainer status. Trainers appear in trainer search and get the Coaching page. */
+function TrainerCard({ profile, onSaved }: { profile: Profile; onSaved: (msg: string) => Promise<void> }) {
+  const [isTrainer, setIsTrainer] = useState(!!profile.isTrainer);
+  const [bio, setBio] = useState(profile.trainerBio ?? '');
+  const [specialties, setSpecialties] = useState((profile.trainerSpecialties ?? []).join(', '));
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  return (
+    <Card title="Coaching">
+      <Switch
+        checked={isTrainer}
+        onChange={setIsTrainer}
+        label="I coach or train others"
+        hint="Trainees can then find you, connect, and pick you for their sessions. You can still train yourself."
+      />
+      {isTrainer && (
+        <div className="form-grid" style={{ marginTop: 12 }}>
+          <label className="field span-2">
+            About you as a trainer
+            <textarea
+              rows={2}
+              maxLength={500}
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              placeholder="e.g. Level 2 cricket coach, 10 years with fast bowlers"
+            />
+          </label>
+          <label className="field span-2">
+            Specialties
+            <input
+              value={specialties}
+              onChange={(e) => setSpecialties(e.target.value)}
+              placeholder="e.g. Fast bowling, Strength & conditioning"
+            />
+            <span className="field-hint">Separate with commas – trainees can search for these</span>
+          </label>
+        </div>
+      )}
+      {error && <p className="field-error">{error}</p>}
+      <button
+        className="btn btn-sm"
+        style={{ marginTop: 12 }}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await api('/profiles/me/trainer', {
+              method: 'PUT',
+              body: {
+                isTrainer,
+                bio: bio.trim() || null,
+                specialties: specialties
+                  .split(',')
+                  .map((x) => x.trim())
+                  .filter(Boolean),
+              },
+            });
+            setError(undefined);
+            await onSaved(
+              isTrainer
+                ? 'You are listed as a trainer. Open Coaching in the menu to invite trainees.'
+                : 'You are no longer listed as a trainer.',
+            );
+          } catch (e) {
+            setError(errorText(e));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Save coaching settings
+      </button>
+    </Card>
   );
 }

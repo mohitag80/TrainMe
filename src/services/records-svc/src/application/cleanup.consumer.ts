@@ -69,6 +69,13 @@ export class CleanupConsumer implements OnApplicationBootstrap, OnApplicationShu
   private async userDeleted(trx: Trx, userId: string) {
     const r = await trx.deleteFrom('activitySession').where('userId', '=', userId).executeTakeFirst();
     await trx.deleteFrom('sessionLocator').where('userId', '=', userId).execute();
+    // Feedback on the erased trainee's sessions, and feedback the erased person wrote as a trainer.
+    await trx
+      .deleteFrom('sessionFeedback')
+      .where((eb) => eb.or([eb('traineeId', '=', userId), eb('authorId', '=', userId)]))
+      .execute();
+    // Sessions where the erased person was the trainer stay with the trainee, without the trainer link.
+    await trx.updateTable('activitySession').set({ trainerId: null }).where('trainerId', '=', userId).execute();
     this.log.info({ sessions: Number(r.numDeletedRows) }, 'user data erased');
   }
 }

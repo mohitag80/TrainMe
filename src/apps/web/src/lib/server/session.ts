@@ -1,4 +1,5 @@
 import 'server-only';
+import { logger } from './log';
 import { randomBytes } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { webConfig } from './config';
@@ -72,8 +73,12 @@ export async function getSession(): Promise<Session | null> {
     try {
       s = toSession(await refreshTokens(s.refreshToken));
       await redis().set(key(sid), JSON.stringify(s), 'PX', Math.max(s.refreshExpiresAt - Date.now(), 60_000));
-    } catch {
+    } catch (err) {
       await redis().del(key(sid));
+      (await logger()).info(
+        { userId: s.user.id, err: (err as Error).message },
+        'session expired – token refresh failed',
+      );
       return null;
     }
   }

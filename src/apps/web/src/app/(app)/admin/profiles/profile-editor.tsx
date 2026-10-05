@@ -44,7 +44,13 @@ export function ProfileEditor({
   const [picked, setPicked] = useState<string[]>([]);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string; list?: string[]; link?: string }>();
+  const [msg, setMsg] = useState<{
+    tone: 'ok' | 'bad';
+    text: string;
+    list?: string[];
+    link?: string;
+    linkText?: string;
+  }>();
 
   useEffect(() => {
     const d = doc.data;
@@ -92,6 +98,20 @@ export function ProfileEditor({
   const d = doc.data;
   const base = d ? `/admin/catalog/templates/${encodeURIComponent(d.code)}/versions/${d.version}` : '';
   const fail = (e: unknown) => {
+    if (e instanceof ApiError && e.problem.type?.endsWith('/duplicate-name')) {
+      const ex = e.problem.existing as { code: string; version: number; kind: 'profile' | 'activity' } | undefined;
+      setMsg({
+        tone: 'bad',
+        text: `${e.message}. Open that one instead, or choose another name.`,
+        ...(ex
+          ? {
+              link: `/admin/${ex.kind === 'profile' ? 'profiles' : 'activities'}/${encodeURIComponent(ex.code)}/${ex.version}`,
+              linkText: 'Open it →',
+            }
+          : {}),
+      });
+      return;
+    }
     const errors = e instanceof ApiError ? (e.problem.errors ?? []).map((x) => x.message) : [];
     setMsg({ tone: 'bad', text: errors.length ? 'Please fix these:' : errorText(e), list: errors });
   };
@@ -149,11 +169,15 @@ export function ProfileEditor({
     if (!s) return;
     const drafts = picked
       .map((c) => byCode.get(c))
-      .filter((a): a is ActivityRow => !!a && (a.status === 'DRAFT' || a.hasDraft))
-      .map((a) => a.name);
+      .filter((a): a is ActivityRow => !!a && (a.status === 'DRAFT' || a.hasDraft));
+    // Brand-new activities are simply part of this profile. Changes to activities that are already live may
+    // also update other profiles, so only those are confirmed.
+    const liveChanges = drafts.filter((a) => a.publishedVersion !== null);
     if (
-      drafts.length &&
-      !confirm(`Publishing this profile also publishes these activities:\n\n• ${drafts.join('\n• ')}\n\nContinue?`)
+      liveChanges.length &&
+      !confirm(
+        `These activities are already in use and have unpublished changes. Publishing also applies the changes everywhere they are used:\n\n• ${liveChanges.map((a) => a.name).join('\n• ')}\n\nContinue?`,
+      )
     )
       return;
     setBusy(true);
@@ -164,7 +188,9 @@ export function ProfileEditor({
       });
       setMsg({
         tone: 'ok',
-        text: 'Published – it is now in the Catalog for everyone.',
+        text: drafts.length
+          ? `Published together with ${drafts.map((a) => `“${a.name}”`).join(', ')} – it is now in the Catalog for everyone.`
+          : 'Published – it is now in the Catalog for everyone.',
         link: `/catalog/${encodeURIComponent(s.code)}`,
       });
       router.replace(`/admin/profiles/${encodeURIComponent(s.code)}/${s.version}`);
@@ -316,7 +342,7 @@ export function ProfileEditor({
           {msg.link && (
             <>
               {' '}
-              <Link href={msg.link}>View it as users see it →</Link>
+              <Link href={msg.link}>{msg.linkText ?? 'View it as users see it →'}</Link>
             </>
           )}
           {msg.list && msg.list.length > 0 && (

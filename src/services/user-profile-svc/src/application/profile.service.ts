@@ -1,10 +1,11 @@
+import type { Logger } from '@trainme/observability';
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuthUser } from '@trainme/auth';
 import { isUniqueViolation, newId, sql, type Kysely, type Transaction } from '@trainme/db';
 import { ProblemError } from '@trainme/errors';
 import { EVENT_TYPES, TOPICS, type UserDeletedPayload, type UserProfilePayload } from '@trainme/events';
 import type { OutboxWriter } from '@trainme/kafka';
-import { DATABASE, OUTBOX } from '@trainme/service-kit';
+import { DATABASE, LOGGER, OUTBOX } from '@trainme/service-kit';
 import type { ProfileDatabase, UnitPreferences, UserProfileTable } from '../infrastructure/profile.database.js';
 
 type Trx = Transaction<ProfileDatabase>;
@@ -40,6 +41,9 @@ const PROFILE_COLUMNS = [
   'weekStart',
   'interests',
   'isOnboarded',
+  'isTrainer',
+  'trainerBio',
+  'trainerSpecialties',
   'rowVersion',
   'createdAt',
   'updatedAt',
@@ -48,6 +52,7 @@ const PROFILE_COLUMNS = [
 @Injectable()
 export class ProfileService {
   constructor(
+    @Inject(LOGGER) private readonly log: Logger,
     @Inject(DATABASE) private readonly db: Kysely<ProfileDatabase>,
     @Inject(OUTBOX) private readonly outbox: OutboxWriter,
   ) {}
@@ -161,7 +166,11 @@ export class ProfileService {
           .doUpdateSet({ platform: d.platform, appVersion: d.appVersion ?? null, lastSeenAt: new Date() }),
       )
       .returning(['id', 'platform', 'appVersion', 'lastSeenAt'])
-      .executeTakeFirstOrThrow();
+      .executeTakeFirstOrThrow()
+      .then((device) => {
+        this.log.info({ userId: user.id, deviceId: device.id, platform: d.platform }, 'device registered');
+        return device;
+      });
   }
 
   async removeDevice(user: AuthUser, id: string): Promise<void> {
@@ -171,6 +180,7 @@ export class ProfileService {
       .where('userId', '=', user.id)
       .executeTakeFirst();
     if (r.numDeletedRows === 0n) throw ProblemError.notFound(`Device ${id}`);
+    this.log.info({ userId: user.id, deviceId: id }, 'device removed');
   }
 
   /** FR-PRF-03: queued; the export job collects data from every service (asynchronous, ≤ 24 h). */
@@ -180,7 +190,11 @@ export class ProfileService {
       .insertInto('dataRequest')
       .values({ id: newId(), userId: user.id, type: 'EXPORT', status: 'REQUESTED', completedAt: null, details: '{}' })
       .returning(['id', 'type', 'status', 'requestedAt'])
-      .executeTakeFirstOrThrow();
+      .executeTakeFirstOrThrow()
+      .then((r) => {
+        this.log.info({ userId: user.id, requestId: r.id }, 'data export requested');
+        return r;
+      });
   }
 
   async requests(user: AuthUser) {
@@ -229,12 +243,20 @@ export class ProfileService {
         .where('id', '=', user.id)
         .execute();
       await trx.deleteFrom('userDevice').where('userId', '=', user.id).execute();
+      // Erasure ends every trainer/trainee link (FR-COA-04); other users keep their history rows.
+      await trx
+        .updateTable('trainerConnection')
+        .set({ status: 'ENDED', endedAt: new Date(), endedBy: user.id })
+        .where((eb) => eb.or([eb('trainerId', '=', user.id), eb('traineeId', '=', user.id)]))
+        .where('status', 'in', ['PENDING', 'ACTIVE'])
+        .execute();
       await this.outbox.enqueue<UserDeletedPayload>(trx, TOPICS.user, {
         type: EVENT_TYPES.userDeleted,
         userId: user.id,
         subject: `user/${user.id}`,
         data: { userId: user.id, requestedAt: new Date().toISOString() },
       });
+      this.log.info({ userId: user.id, requestId: req.id }, 'account erasure requested');
       return req;
     });
   }
@@ -242,6 +264,7 @@ export class ProfileService {
   /** S9: support search by email or name (trigram), support/admin only. */
   async search(q: string, limit: number) {
     const term = q.toLowerCase();
+    this.log.info({ queryLength: q.length, limit }, 'support user search'); // the query itself may be an email
     return this.db
       .selectFrom('userProfile')
       .select(['id', 'email', 'displayName', 'createdAt', 'deletedAt'])
@@ -274,6 +297,10 @@ export class ProfileService {
       unitPreferences: UnitPreferences;
     },
   ) {
+    this.log.info(
+      { event: type, userId: p.id, timezone: p.timezone, locale: p.locale },
+      type.replace('user.', 'profile '),
+    );
     await this.outbox.enqueue<UserProfilePayload>(trx, TOPICS.user, {
       type,
       userId: p.id,

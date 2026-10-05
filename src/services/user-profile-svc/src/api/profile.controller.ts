@@ -3,6 +3,7 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { AuthUser } from '@trainme/auth';
 import { CurrentUser, etag, parseIfMatch, Roles, ZodPipe } from '@trainme/service-kit';
+import { isTechnical } from '../application/coaching.service.js';
 import { ProfileService } from '../application/profile.service.js';
 
 const system = z.enum(['METRIC', 'IMPERIAL']);
@@ -54,7 +55,8 @@ export class ProfileController {
   async me(@CurrentUser() user: AuthUser, @Res({ passthrough: true }) res: FastifyReply) {
     const p = await this.profiles.me(user);
     void res.header('etag', etag(p.rowVersion));
-    return p;
+    // Technical accounts (admin, curator, support) never coach or train with a coach (docs/12 §2).
+    return { ...p, canCoach: !isTechnical(user) };
   }
 
   @Put('me')

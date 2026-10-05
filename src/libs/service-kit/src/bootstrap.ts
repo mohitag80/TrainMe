@@ -5,7 +5,7 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { createTokenVerifier, type TokenVerifierOptions } from '@trainme/auth';
-import { createLogger, httpRequestDuration, type Logger } from '@trainme/observability';
+import { createServiceLogger, httpRequestDuration, type Logger } from '@trainme/observability';
 import { AuthGuard, TOKEN_VERIFIER } from './auth.guard.js';
 import { HealthController, HealthRegistry } from './health.js';
 import { ProblemExceptionFilter } from './problem.filter.js';
@@ -16,6 +16,8 @@ export interface ServiceOptions {
   name: string;
   port: number;
   logLevel: string;
+  /** Folder for daily log files (`LOG_DIR`, set via ConfigMap); unset = stdout only. */
+  logDir?: string;
   auth: TokenVerifierOptions;
   /** Max request body; checkpoint batches are ≤ 256 KB (LLD §4.5). */
   bodyLimitBytes?: number;
@@ -68,7 +70,7 @@ export async function bootstrapService(
   appModule: Type<unknown> | DynamicModule,
   opts: ServiceOptions,
 ): Promise<{ app: NestFastifyApplication; log: Logger }> {
-  const log = createLogger(opts.name, opts.logLevel);
+  const log = await createServiceLogger(opts.name, opts.logLevel, opts.logDir ?? (process.env.LOG_DIR || undefined));
   const adapter = new FastifyAdapter({
     bodyLimit: opts.bodyLimitBytes ?? 262_144,
     trustProxy: true,
@@ -101,10 +103,19 @@ export async function bootstrapService(
     const seconds = reply.elapsedTime / 1000;
     httpRequestDuration.observe({ method: req.method, route, status: String(reply.statusCode) }, seconds);
     if (!route.startsWith('/health') && route !== '/metrics') {
-      log.info(
-        { requestId: req.id, method: req.method, route, status: reply.statusCode, ms: Math.round(reply.elapsedTime) },
-        'request',
-      );
+      const user = (req as unknown as { user?: { id?: string } }).user;
+      const line = {
+        requestId: req.id,
+        method: req.method,
+        route,
+        status: reply.statusCode,
+        ms: Math.round(reply.elapsedTime),
+        ...(user?.id ? { userId: user.id } : {}),
+      };
+      // 5xx are logged with their stack by the exception filter; here: info for success, warn for client errors.
+      if (reply.statusCode >= 400 && reply.statusCode < 500) log.warn(line, 'request rejected');
+      else log.info(line, 'request');
+      log.debug({ requestId: req.id, url: req.url }, 'request url');
     }
   });
 

@@ -74,8 +74,10 @@ export class EventConsumer<DB extends ConsumerTables> {
       return;
     }
     const handler = this.opts.handlers[event.type];
+    this.opts.log.debug({ topic, type: event.type, eventId: event.id, subject: event.subject }, 'event received');
     if (!handler) {
       eventsProcessed.inc({ topic, type: event.type, outcome: 'skipped' });
+      this.opts.log.debug({ type: event.type, eventId: event.id }, 'event skipped – no handler');
       return;
     }
     const maxAttempts = this.opts.maxAttempts ?? 3;
@@ -89,12 +91,14 @@ export class EventConsumer<DB extends ConsumerTables> {
           await this.toDlq(topic, message, err);
           return;
         }
+        this.opts.log.warn({ err, eventId: event.id, type: event.type, attempt }, 'event failed – retrying');
         await new Promise((r) => setTimeout(r, 200 * 2 ** attempt));
       }
     }
   }
 
   private async process(topic: string, event: CloudEvent<never>, handler: EventHandler<DB>): Promise<void> {
+    const started = Date.now();
     const outcome = await this.opts.db.transaction().execute(async (trx) => {
       // Kysely's generic table typing cannot see ConsumerTables through DB, hence the raw insert.
       const inserted = await sql<{ eventId: string }>`
@@ -105,6 +109,10 @@ export class EventConsumer<DB extends ConsumerTables> {
       return 'ok';
     });
     eventsProcessed.inc({ topic, type: event.type, outcome });
+    this.opts.log.info(
+      { type: event.type, eventId: event.id, subject: event.subject, outcome, ms: Date.now() - started },
+      outcome === 'duplicate' ? 'event already handled – ignored' : 'event handled',
+    );
   }
 
   private async toDlq(topic: string, message: KafkaMessage, err: unknown): Promise<void> {

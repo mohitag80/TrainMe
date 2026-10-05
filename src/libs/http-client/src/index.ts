@@ -103,7 +103,13 @@ export class ServiceClient {
       } catch (err) {
         if (err instanceof UpstreamError && err.status < 500) throw err; // caller's problem, not the dependency's
         lastErr = err;
-        if (attempt < attempts) await sleep(100 * 2 ** attempt * (0.5 + Math.random()));
+        if (attempt < attempts) {
+          this.opts.log.warn(
+            { err, service: this.opts.name, method, path, attempt },
+            'upstream call failed – retrying',
+          );
+          await sleep(100 * 2 ** attempt * (0.5 + Math.random()));
+        }
       }
     }
     this.failures++;
@@ -117,6 +123,7 @@ export class ServiceClient {
 
   private async once<T>(method: string, path: string, body: unknown, o: RequestOptions): Promise<T> {
     const token = o.bearer ?? (this.opts.serviceToken ? await this.opts.serviceToken.token() : undefined);
+    const started = performance.now();
     const res = await fetch(this.opts.baseUrl + path, {
       method,
       headers: {
@@ -131,6 +138,17 @@ export class ServiceClient {
     });
     const text = await res.text();
     const parsed: unknown = text ? JSON.parse(text) : undefined;
+    this.opts.log.debug(
+      {
+        service: this.opts.name,
+        method,
+        path,
+        status: res.status,
+        ms: Math.round(performance.now() - started),
+        requestId: o.requestId,
+      },
+      'upstream call',
+    );
     if (!res.ok) throw new UpstreamError(res.status, parsed, this.opts.name);
     return parsed as T;
   }

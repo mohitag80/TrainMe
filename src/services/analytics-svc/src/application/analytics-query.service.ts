@@ -1,10 +1,11 @@
+import type { Logger } from '@trainme/observability';
 import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuthUser } from '@trainme/auth';
 import type { JsonCache } from '@trainme/cache';
 import { isQueryTimeout, setLocalStatementTimeout, type Kysely } from '@trainme/db';
 import { ProblemError } from '@trainme/errors';
-import { CACHE, DATABASE, SERVICE_CONFIG } from '@trainme/service-kit';
+import { CACHE, DATABASE, LOGGER, SERVICE_CONFIG } from '@trainme/service-kit';
 import type { AnalyticsConfig } from '../config/analytics.config.js';
 import { addDays, isoWeekStart, monthStart, periodStart } from '../domain/periods.js';
 import type { AnalyticsDatabase, Granularity } from '../infrastructure/analytics.database.js';
@@ -59,6 +60,7 @@ export function rollupValue(r: RollupValues, itemType: 'P' | 'M', agg: ParamAgg 
 @Injectable()
 export class AnalyticsQueryService {
   constructor(
+    @Inject(LOGGER) private readonly log: Logger,
     @Inject(DATABASE) private readonly db: Kysely<AnalyticsDatabase>,
     @Inject(CACHE) private readonly cache: JsonCache,
     @Inject(SERVICE_CONFIG) private readonly config: AnalyticsConfig,
@@ -69,7 +71,14 @@ export class AnalyticsQueryService {
   async series(user: AuthUser, q: SeriesQuery) {
     const key = `ana:chart:${user.id}:${q.trackerId}:${createHash('sha1').update(JSON.stringify(q)).digest('hex')}`;
     const cached = await this.cache.get<unknown>(key);
-    if (cached) return cached;
+    if (cached) {
+      this.log.debug(
+        { userId: user.id, trackerId: q.trackerId, item: q.item, granularity: q.granularity },
+        'chart from cache',
+      );
+      return cached;
+    }
+    const started = Date.now();
     const itemType = q.itemType === 'metric' ? 'M' : 'P';
     const rows = await this.db
       .selectFrom('metricRollup')
@@ -99,6 +108,18 @@ export class AnalyticsQueryService {
       })),
     };
     await this.cache.setTracked(chartGroupKey(user.id, q.trackerId), key, result, 300);
+    this.log.debug(
+      {
+        userId: user.id,
+        trackerId: q.trackerId,
+        activity: q.activity,
+        item: q.item,
+        granularity: q.granularity,
+        points: rows.length,
+        ms: Date.now() - started,
+      },
+      'chart built',
+    );
     return result;
   }
 

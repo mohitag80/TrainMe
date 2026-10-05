@@ -14,6 +14,11 @@ export class ProblemExceptionFilter implements ExceptionFilter {
     const reply = http.getResponse<FastifyReply>();
     const problem = this.toProblem(err, req.url);
     if (problem.status >= 500) this.log.error({ err, requestId: req.id, url: req.url }, 'request failed');
+    else
+      this.log.debug(
+        { requestId: req.id, status: problem.status, type: problem.type, detail: problem.detail, errors: problem.errors },
+        'request problem',
+      );
     void reply.status(problem.status).header('content-type', 'application/problem+json').send(problem);
   }
 

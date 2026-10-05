@@ -1,10 +1,11 @@
+import type { Logger } from '@trainme/observability';
 import { Inject, Injectable } from '@nestjs/common';
 import type { JsonCache, Redis } from '@trainme/cache';
 import { newId, type Kysely } from '@trainme/db';
 import { ProblemError } from '@trainme/errors';
 import { EVENT_TYPES, TOPICS, type TemplatePublishedPayload } from '@trainme/events';
 import type { OutboxWriter } from '@trainme/kafka';
-import { CACHE, DATABASE, OUTBOX, REDIS } from '@trainme/service-kit';
+import { CACHE, DATABASE, LOGGER, OUTBOX, REDIS } from '@trainme/service-kit';
 import type { CatalogDatabase } from '../infrastructure/catalog.database.js';
 import { CACHE_KEYS } from './catalog-query.service.js';
 import { rebuildSearchDocuments } from './search-documents.js';
@@ -14,6 +15,7 @@ type TemplateStatus = 'DRAFT' | 'PUBLISHED' | 'RETIRED';
 @Injectable()
 export class CatalogAdminService {
   constructor(
+    @Inject(LOGGER) private readonly log: Logger,
     @Inject(DATABASE) private readonly db: Kysely<CatalogDatabase>,
     @Inject(CACHE) private readonly cache: JsonCache,
     @Inject(REDIS) private readonly redis: Redis,
@@ -77,6 +79,7 @@ export class CatalogAdminService {
         subject: `template/${code}`,
         data: { templateCode: code, version, name: tpl.name },
       });
+      this.log.info({ code, version, from: tpl.status, to: status, actorId }, 'template status changed');
       return { code, version, status, changed: true };
     });
     if (result.changed) await this.invalidate(code);
@@ -87,7 +90,8 @@ export class CatalogAdminService {
   async invalidate(templateCode?: string): Promise<void> {
     if (templateCode) await this.cache.del(CACHE_KEYS.templateLatest(templateCode));
     try {
-      await this.redis.incr(CACHE_KEYS.version);
+      const v = await this.redis.incr(CACHE_KEYS.version);
+      this.log.debug({ templateCode, catalogVersion: v }, 'catalog cache invalidated');
     } catch {
       // Cache is optional; stale entries expire by TTL.
     }

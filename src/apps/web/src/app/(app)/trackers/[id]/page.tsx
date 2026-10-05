@@ -10,7 +10,7 @@ import { api, ApiError, errorText } from '@/lib/client/api';
 import { defaultSessionName, displayUnitFor, timeZone, todayLocal, units } from '@/lib/client/format';
 import { useData } from '@/lib/client/use-data';
 import { humanize, recordingModeLabel, type ParamRow } from '@/lib/labels';
-import type { Profile, Session, TrackerDetail, TrackerSchema } from '@/lib/types';
+import type { Connections, Profile, Session, TrackerDetail, TrackerSchema } from '@/lib/types';
 
 export default function TrackerPage() {
   const { id } = useParams<{ id: string }>();
@@ -234,6 +234,10 @@ function StartSession({ tracker, autoFocus }: { tracker: TrackerDetail; autoFocu
   const [suggestion, setSuggestion] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  // FR-COA-05: optional trainer – only trainers the user is actively connected with.
+  const connections = useData<Connections>('/profiles/connections');
+  const trainers = (connections.data?.asTrainee ?? []).filter((c) => c.status === 'ACTIVE');
+  const [trainerId, setTrainerId] = useState('');
 
   async function start(useName = name) {
     setBusy(true);
@@ -250,6 +254,7 @@ function StartSession({ tracker, autoFocus }: { tracker: TrackerDetail; autoFocu
           timezone: timeZone(),
           source: 'WEB',
           onNameConflict: 'REJECT',
+          ...(trainerId ? { trainerId } : {}),
         },
       });
       router.push(`/sessions/${s.id}`);
@@ -282,6 +287,20 @@ function StartSession({ tracker, autoFocus }: { tracker: TrackerDetail; autoFocu
           Date
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
+        {trainers.length > 0 && (
+          <label className="field">
+            Trainer (optional)
+            <select value={trainerId} onChange={(e) => setTrainerId(e.target.value)}>
+              <option value="">No trainer – just me</option>
+              {trainers.map((t) => (
+                <option key={t.otherId} value={t.otherId}>
+                  {t.otherName}
+                </option>
+              ))}
+            </select>
+            <span className="field-hint">They can follow this session live, log entries and give feedback</span>
+          </label>
+        )}
       </div>
       {error && (
         <div className="alert alert-warn" style={{ marginTop: 12 }}>

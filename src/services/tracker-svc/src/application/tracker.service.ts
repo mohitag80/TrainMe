@@ -1,3 +1,4 @@
+import type { Logger } from '@trainme/observability';
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuthUser } from '@trainme/auth';
 import type { JsonCache } from '@trainme/cache';
@@ -13,7 +14,7 @@ import {
   type SchemaIssue,
   type TemplateSnapshot,
 } from '@trainme/schema';
-import { CACHE, DATABASE, OUTBOX } from '@trainme/service-kit';
+import { CACHE, DATABASE, LOGGER, OUTBOX } from '@trainme/service-kit';
 import { UnitRegistry } from '@trainme/units';
 import { resolveEntitlements, type TrackerEntitlements } from '../domain/entitlements.js';
 import { CatalogClient } from '../infrastructure/catalog.client.js';
@@ -43,6 +44,7 @@ const schemaKey = (id: string, v: number) => `trk:schema:${id}:v${v}`;
 @Injectable()
 export class TrackerService {
   constructor(
+    @Inject(LOGGER) private readonly log: Logger,
     @Inject(DATABASE) private readonly db: Kysely<TrackerDatabase>,
     @Inject(CACHE) private readonly cache: JsonCache,
     @Inject(OUTBOX) private readonly outbox: OutboxWriter,
@@ -253,6 +255,18 @@ export class TrackerService {
   async addOverride(user: AuthUser, id: string, ifMatch: number | undefined, input: OverrideInput, requestId?: string) {
     // Adding a catalog activity: the snapshot always comes from catalog-svc, never from the client.
     const fromCatalog = input.target === 'ACTIVITY' && input.action === 'ADD' && input.definition?.source === 'CATALOG';
+    this.log.debug(
+      {
+        trackerId: id,
+        userId: user.id,
+        target: input.target,
+        action: input.action,
+        activityCode: input.activityCode,
+        itemKey: input.itemKey,
+        fromCatalog,
+      },
+      'add customisation',
+    );
     const definition = fromCatalog
       ? { source: 'CATALOG', snapshot: await this.catalog.activity(input.activityCode, requestId) }
       : (input.definition ?? {});
@@ -333,6 +347,7 @@ export class TrackerService {
         .set({ displayUnits: JSON.stringify(next), rowVersion: t.rowVersion + 1, updatedAt: new Date() })
         .where('id', '=', id)
         .execute();
+      this.log.info({ trackerId: id, userId: user.id, displayUnits: next }, 'display units changed');
       return { trackerId: id, displayUnits: next };
     });
   }
@@ -369,6 +384,18 @@ export class TrackerService {
       droppedOverrides: dropped,
       issues: blocking,
     };
+    this.log.info(
+      {
+        trackerId: id,
+        userId: user.id,
+        from: diff.from,
+        to: diff.to,
+        dryRun,
+        blocking: blocking.length,
+        dropped: dropped.length,
+      },
+      dryRun ? 'upgrade preview' : 'upgrade requested',
+    );
     if (dryRun || blocking.length) return { upgraded: false, ...diff };
     return this.db.transaction().execute(async (trx) => {
       const t = await this.lockForUpdate(trx, user, id, ifMatch);
@@ -414,7 +441,14 @@ export class TrackerService {
         .executeTakeFirstOrThrow();
       const overrides = await change(trx, t, await this.overrides(trx, id));
       const compiled = this.compile(base.baseSnapshot.activities, overrides, await this.entitlements(user));
-      if (compiled.issues.length) throw ProblemError.validation(compiled.issues); // rolls back the change
+      if (compiled.issues.length) {
+        this.log.debug({ trackerId: id, userId: user.id, issues: compiled.issues }, 'customisation rejected');
+        throw ProblemError.validation(compiled.issues); // rolls back the change
+      }
+      this.log.debug(
+        { trackerId: id, overrides: overrides.length, nextVersion: t.schemaVersion + 1 },
+        'customisation compiled',
+      );
       const version = t.schemaVersion + 1;
       await trx
         .insertInto('trackerSchema')
@@ -507,6 +541,17 @@ export class TrackerService {
   }
 
   private async emit(trx: Trx, type: (typeof EVENT_TYPES)[keyof typeof EVENT_TYPES], t: TrackerRow) {
+    this.log.info(
+      {
+        event: type,
+        trackerId: t.id,
+        userId: t.userId,
+        templateCode: t.templateCode,
+        schemaVersion: t.schemaVersion,
+        status: t.status,
+      },
+      type.replace('tracker.', 'tracker ').replace('.', ' '),
+    );
     await this.outbox.enqueue<TrackerPayload>(trx, TOPICS.tracker, {
       type,
       userId: t.userId,

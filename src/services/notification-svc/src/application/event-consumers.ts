@@ -3,7 +3,10 @@ import type { Kysely, Transaction } from '@trainme/db';
 import {
   EVENT_TYPES,
   TOPICS,
+  type ConnectionPayload,
+  type FeedbackPayload,
   type NotificationSendPayload,
+  type SessionRefPayload,
   type PrAchievedPayload,
   type SubscriptionPayload,
   type UserProfilePayload,
@@ -41,12 +44,18 @@ export class NotificationEventConsumers implements OnApplicationBootstrap, OnApp
       db: this.db,
       log: this.log,
       groupId: 'notification-svc.delivery',
-      topics: [TOPICS.user, TOPICS.analytics, TOPICS.subscription, TOPICS.notificationCommands],
+      topics: [TOPICS.user, TOPICS.analytics, TOPICS.subscription, TOPICS.notificationCommands, TOPICS.record],
       handlers: {
         [EVENT_TYPES.userRegistered]: (e, trx) => this.upsertContact(trx, e.data as UserProfilePayload),
         [EVENT_TYPES.userUpdated]: (e, trx) => this.upsertContact(trx, e.data as UserProfilePayload),
         [EVENT_TYPES.userDeleted]: (e, trx) => this.eraseUser(trx, (e.data as { userId: string }).userId),
         [EVENT_TYPES.prAchieved]: (e, trx) => this.personalBest(trx, e.data as PrAchievedPayload),
+        [EVENT_TYPES.connectionRequested]: (e, trx) => this.connection(trx, e.data as ConnectionPayload, 'requested'),
+        [EVENT_TYPES.connectionAccepted]: (e, trx) => this.connection(trx, e.data as ConnectionPayload, 'accepted'),
+        [EVENT_TYPES.connectionDeclined]: (e, trx) => this.connection(trx, e.data as ConnectionPayload, 'declined'),
+        [EVENT_TYPES.connectionEnded]: (e, trx) => this.connection(trx, e.data as ConnectionPayload, 'ended'),
+        [EVENT_TYPES.sessionStarted]: (e, trx) => this.liveSession(trx, e.data as SessionRefPayload),
+        [EVENT_TYPES.feedbackAdded]: (e, trx) => this.feedback(trx, e.data as FeedbackPayload),
         [EVENT_TYPES.subscriptionActivated]: (e, trx) =>
           this.subscription(trx, e.data as SubscriptionPayload, 'activated'),
         [EVENT_TYPES.subscriptionChanged]: (e, trx) => this.subscription(trx, e.data as SubscriptionPayload, 'changed'),
@@ -107,6 +116,77 @@ export class NotificationEventConsumers implements OnApplicationBootstrap, OnApp
           .doUpdateSet({ email: null, displayName: 'Deleted user', isDeleted: true, updatedAt: new Date() }),
       )
       .execute();
+  }
+
+  /** Trainer ↔ trainee connections (FR-COA-02..04): tell the person who did not act. */
+  private async connection(trx: Trx, c: ConnectionPayload, what: 'requested' | 'accepted' | 'declined' | 'ended') {
+    const actorIsTrainer = c.actorId === c.trainerId;
+    const to = actorIsTrainer ? c.traineeId : c.trainerId;
+    const actor = actorIsTrainer ? c.trainerName : c.traineeName;
+    const text = {
+      requested: actorIsTrainer
+        ? [`${actor} invited you to train with them`, 'Open My trainers to accept or decline.']
+        : [`${actor} wants you as their trainer`, 'Open Coaching to accept or decline.'],
+      accepted: [
+        `${actor} accepted`,
+        actorIsTrainer ? `${actor} is now your trainer.` : `${actor} is now your trainee.`,
+      ],
+      declined: [`${actor} declined your request`, 'You can send a new request later.'],
+      ended: [`${actor} ended your coaching connection`, 'Past sessions stay in your history.'],
+    }[what];
+    await this.dispatcher.dispatch(
+      {
+        userId: to,
+        template: `connection-${what}`,
+        title: text[0]!,
+        body: text[1]!,
+        data: { ...c },
+        channels: ['PUSH'],
+      },
+      trx,
+    );
+  }
+
+  /** A trainee started a session with a trainer (FR-COA-06): the trainer can join and record. */
+  private async liveSession(trx: Trx, s: SessionRefPayload) {
+    if (!s.trainerId) return;
+    const trainee = await trx
+      .selectFrom('userContact')
+      .select('displayName')
+      .where('userId', '=', s.userId)
+      .executeTakeFirst();
+    const who = trainee?.displayName ?? 'Your trainee';
+    await this.dispatcher.dispatch(
+      {
+        userId: s.trainerId,
+        template: 'coaching-live-session',
+        title: `${who} started a live session with you`,
+        body: `“${s.name}” – open Coaching to follow and record.`,
+        data: { ...s },
+        channels: ['PUSH'],
+      },
+      trx,
+    );
+  }
+
+  /** Trainer feedback on a session or entry (FR-COA-09). */
+  private async feedback(trx: Trx, f: FeedbackPayload) {
+    const trainer = await trx
+      .selectFrom('userContact')
+      .select('displayName')
+      .where('userId', '=', f.authorId)
+      .executeTakeFirst();
+    await this.dispatcher.dispatch(
+      {
+        userId: f.traineeId,
+        template: 'coaching-feedback',
+        title: `${trainer?.displayName ?? 'Your trainer'} left feedback on “${f.sessionName}”`,
+        body: f.excerpt,
+        data: { ...f },
+        channels: ['PUSH', 'EMAIL'],
+      },
+      trx,
+    );
   }
 
   private async personalBest(trx: Trx, p: PrAchievedPayload) {

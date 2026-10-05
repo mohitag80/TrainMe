@@ -93,6 +93,7 @@ export class SubscriptionService {
         expiresAt: new Date(Date.now() + 30 * 60_000),
       })
       .execute();
+    this.log.info({ userId: user.id, planCode, checkoutId: id, provider: 'MOCK' }, 'checkout started');
     return {
       checkoutId: id,
       provider: 'MOCK',
@@ -129,6 +130,7 @@ export class SubscriptionService {
     const c = await this.checkoutSession(id);
     if (c.status !== 'OPEN' || c.expiresAt < new Date())
       throw ProblemError.conflict('checkout-closed', 'This checkout is no longer open');
+    this.log.info({ checkoutId: id, userId: c.userId, planCode: c.planCode, outcome }, 'mock payment page answered');
     if (outcome === 'cancel') {
       await this.db.updateTable('checkoutSession').set({ status: 'CANCELED' }).where('id', '=', id).execute();
       return { status: 'CANCELED', returnUrl: `${this.config.PUBLIC_URL}/subscription?checkout=canceled` };
@@ -148,12 +150,19 @@ export class SubscriptionService {
       body,
       signal: AbortSignal.timeout(5_000),
     });
-    if (!res.ok) throw new ProblemError(502, 'payment-failed', 'Payment failed', `Webhook answered ${res.status}`);
+    if (!res.ok) {
+      this.log.error({ checkoutId: id, status: res.status }, 'mock webhook call failed');
+      throw new ProblemError(502, 'payment-failed', 'Payment failed', `Webhook answered ${res.status}`);
+    }
     return { status: 'COMPLETED', returnUrl: `${this.config.PUBLIC_URL}/subscription?checkout=success` };
   }
 
   /** FR-SUB-04: idempotent by provider event id; a duplicate delivery is acknowledged and ignored. */
   async handleWebhook(provider: 'MOCK', event: WebhookEvent): Promise<{ duplicate: boolean }> {
+    this.log.info(
+      { provider, providerEventId: event.id, type: event.type, userId: event.data.userId },
+      'payment webhook received',
+    );
     let planForKeycloak: { userId: string; plan: string } | undefined;
     try {
       await this.db.transaction().execute(async (trx) => {
@@ -172,10 +181,16 @@ export class SubscriptionService {
         else if (event.type === 'subscription.canceled') planForKeycloak = await this.cancelNow(trx, event.data.userId);
       });
     } catch (err) {
-      if (isUniqueViolation(err, 'uq_payment_event__provider_event')) return { duplicate: true };
+      if (isUniqueViolation(err, 'uq_payment_event__provider_event')) {
+        this.log.info({ provider, providerEventId: event.id }, 'payment webhook already processed – ignored');
+        return { duplicate: true };
+      }
       throw err;
     }
-    if (planForKeycloak) await this.keycloak.setPlan(planForKeycloak.userId, planForKeycloak.plan);
+    if (planForKeycloak) {
+      await this.keycloak.setPlan(planForKeycloak.userId, planForKeycloak.plan);
+      this.log.info(planForKeycloak, 'plan set on the login account');
+    }
     return { duplicate: false };
   }
 
@@ -183,6 +198,10 @@ export class SubscriptionService {
   async cancel(user: AuthUser, immediate: boolean) {
     const sub = await this.live(this.db, user.id);
     if (!sub) throw ProblemError.notFound('Active subscription');
+    this.log.info(
+      { userId: user.id, subscriptionId: sub.id, planCode: sub.planCode, immediate },
+      'cancellation requested',
+    );
     if (immediate) {
       await this.db.transaction().execute((trx) => this.cancelNow(trx, user.id));
       await this.keycloak.setPlan(user.id, 'FREE');
@@ -282,6 +301,17 @@ export class SubscriptionService {
     s: Pick<SubscriptionTable, 'id' | 'userId' | 'planCode' | 'status' | 'currentPeriodEnd'>,
   ) {
     const plan = s.status === 'CANCELED' ? 'FREE' : s.planCode;
+    this.log.info(
+      {
+        event: type,
+        userId: s.userId,
+        subscriptionId: s.id,
+        planCode: s.planCode,
+        status: s.status,
+        effectivePlan: plan,
+      },
+      type.replace('.', ' '),
+    );
     const p = await trx.selectFrom('plan').select('entitlements').where('code', '=', plan).executeTakeFirstOrThrow();
     await this.outbox.enqueue<SubscriptionPayload>(trx, TOPICS.subscription, {
       type,

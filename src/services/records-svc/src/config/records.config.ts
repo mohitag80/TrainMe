@@ -2,6 +2,8 @@ import { loadConfig, platformConfigSchema, z } from '@trainme/config';
 
 export const recordsConfigSchema = platformConfigSchema.extend({
   TRACKER_SVC_URL: z.string().url(),
+  /** Trainer connection checks (v1.4). */
+  PROFILE_SVC_URL: z.string().url(),
   OIDC_TOKEN_URL: z.string().url(),
   SERVICE_CLIENT_ID: z.string().default('trainme-services'),
   SERVICE_CLIENT_SECRET: z.string().min(1),

@@ -2,7 +2,8 @@
 # YAML anchors keep the shared env in one place.
 
 x-common-env: &common-env
-  LOG_LEVEL: info
+  LOG_LEVEL: info # debug | info | warn | error – change in the ConfigMap, then restart the pod
+  LOG_DIR: '' # empty on Kubernetes: logs go to stdout and the cluster collects them
   OIDC_AUDIENCE: trainme-api
   SERVICE_CLIENT_ID: trainme-services
   CATALOG_SVC_URL: http://catalog-svc:8080

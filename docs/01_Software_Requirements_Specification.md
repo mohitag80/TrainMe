@@ -32,7 +32,7 @@ Subscribed users track **any kind of daily work**: gym workouts, diet, sports pr
 - Microservices platform on Kubernetes: **k3s** for test, **AWS (EKS)** for beta.
 
 **Out of scope for v1 (future candidates)**
-- Coach/team accounts and sharing an athlete's dashboard with a coach.
+- Team / organisation accounts (squads, clubs). *Individual trainers and trainees are in scope from v1.4 – see docs/12.*
 - Wearable / device integrations (Apple Health, Google Fit, Garmin, radar guns).
 - Social feed, leaderboards, challenges.
 - AI insights and recommendations.
@@ -389,7 +389,7 @@ Targets apply to **Beta on AWS** unless stated otherwise. The test environment (
 ## 6. Open Questions
 
 1. Launch geography and currency, which decide payment provider priority (Razorpay vs Stripe) and AWS region.
-2. Are coach / team accounts needed for beta? The current scope says no.
+2. ~~Are coach / team accounts needed for beta?~~ **Answered 2026-10-04:** trainer ↔ trainee coaching is in scope (v1.4, docs/12): self-registered trainers, connections either way, optional trainer per session, live co-recording, trainer-only charts, feedback. Teams/clubs stay out of scope.
 3. Exact plan limits and pricing for Free / Pro / Elite.
 4. Is any device integration (e.g. a radar speed gun for cricket) expected in v1?
 5. Is a native tablet layout needed, or is responsive web enough?

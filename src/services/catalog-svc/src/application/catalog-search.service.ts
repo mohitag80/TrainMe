@@ -1,9 +1,10 @@
+import type { Logger } from '@trainme/observability';
 import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { JsonCache } from '@trainme/cache';
 import { isQueryTimeout, setLocalStatementTimeout, sql, type Kysely } from '@trainme/db';
 import { ProblemError } from '@trainme/errors';
-import { CACHE, DATABASE, SERVICE_CONFIG } from '@trainme/service-kit';
+import { CACHE, DATABASE, LOGGER, SERVICE_CONFIG } from '@trainme/service-kit';
 import type { CatalogConfig } from '../config/catalog.config.js';
 import type { CatalogDatabase } from '../infrastructure/catalog.database.js';
 import { CatalogQueryService } from './catalog-query.service.js';
@@ -39,6 +40,7 @@ const arr = (v?: string[]) => (v && v.length ? v : null);
 @Injectable()
 export class CatalogSearchService {
   constructor(
+    @Inject(LOGGER) private readonly log: Logger,
     @Inject(DATABASE) private readonly db: Kysely<CatalogDatabase>,
     @Inject(CACHE) private readonly cache: JsonCache,
     @Inject(SERVICE_CONFIG) private readonly config: CatalogConfig,
@@ -52,7 +54,10 @@ export class CatalogSearchService {
   async search(query: SearchQuery): Promise<SearchHit[]> {
     const version = await this.catalog.catalogVersion();
     const key = `cat:search:${version}:${query.locale}:${createHash('sha1').update(JSON.stringify(query)).digest('hex')}`;
-    return this.cache.getOrLoad(key, 600, () => this.runSearch(query));
+    const started = Date.now();
+    const hits = await this.cache.getOrLoad(key, 600, () => this.runSearch(query));
+    this.log.debug({ q: query.q, types: query.types, hits: hits.length, ms: Date.now() - started }, 'catalog search');
+    return hits;
   }
 
   /** S2: autocomplete on any part of the name (trigram GIN serves LIKE '%abc%'); word starts rank first. */

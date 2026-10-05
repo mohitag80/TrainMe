@@ -1350,3 +1350,74 @@ a.chip {
   border-color: var(--ok, #16a34a);
   color: #fff;
 }
+
+/* coaching */
+.live-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.live-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  text-decoration: none;
+  color: inherit;
+  background: var(--bg);
+}
+.live-card:hover {
+  border-color: var(--brand);
+}
+.live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ef4444;
+  display: inline-block;
+  animation: pulse 1.6s infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.feedback-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.feedback-list li {
+  border-left: 3px solid #7c3aed;
+  padding: 4px 0 4px 12px;
+}
+.feedback-about {
+  font: 700 12px var(--font);
+  color: #7c3aed;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.feedback-body {
+  margin: 2px 0 4px;
+  white-space: pre-wrap;
+}
+.feedback-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.feedback-compose .btn {
+  align-self: flex-start;
+}

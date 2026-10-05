@@ -49,6 +49,12 @@ export interface Session {
   notes: string | null;
   tags: string[];
   rowVersion: number;
+  /** The trainee (owner). */
+  userId?: string;
+  /** Optional trainer assigned at start (v1.4). */
+  trainerId?: string | null;
+  /** The caller's role, returned by GET /sessions/{id}. */
+  myRole?: 'OWNER' | 'TRAINER';
 }
 
 export interface SessionEntry {
@@ -60,6 +66,8 @@ export interface SessionEntry {
   recordedAt: string;
   values: Record<string, unknown>;
   rowVersion: number;
+  /** Who logged it (trainee or trainer); absent on entries logged before v1.4. */
+  recordedBy?: string | null;
 }
 
 export interface Profile {
@@ -73,5 +81,45 @@ export interface Profile {
   weightKg: number | null;
   interests: string[];
   isOnboarded: boolean;
+  isTrainer?: boolean;
+  /** False for technical accounts (admin, curator, support): they never coach or train with a coach. */
+  canCoach?: boolean;
+  trainerBio?: string | null;
+  trainerSpecialties?: string[];
   rowVersion: number;
+}
+
+/** One trainer ↔ trainee link as seen by the caller (GET /profiles/connections). */
+export interface Connection {
+  id: string;
+  status: 'PENDING' | 'ACTIVE';
+  otherId: string;
+  otherName: string;
+  specialties: string[];
+  requestedByMe: boolean;
+  since: string;
+}
+
+export interface Connections {
+  asTrainee: Connection[];
+  asTrainer: Connection[];
+}
+
+export interface TrainerHit {
+  id: string;
+  displayName: string;
+  bio: string | null;
+  specialties: string[];
+  connection: { id: string; status: 'PENDING' | 'ACTIVE'; requestedByMe: boolean } | null;
+}
+
+export interface Feedback {
+  id: string;
+  sessionId: string;
+  authorId: string;
+  clientEntryId: string | null;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  mine: boolean;
 }

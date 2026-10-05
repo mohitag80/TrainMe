@@ -14,6 +14,7 @@ import {
   nextFreeName,
 } from '../domain/session-naming.js';
 import type { RecordsDatabase } from '../infrastructure/records.database.js';
+import { ProfileClient } from '../infrastructure/profile.client.js';
 import { TrackerClient } from '../infrastructure/tracker.client.js';
 import { SessionEvents } from './session-events.js';
 
@@ -29,7 +30,12 @@ export interface StartSessionInput {
   timezone: string;
   source?: 'MOBILE' | 'WEB' | 'IMPORT';
   onNameConflict: 'REJECT' | 'SUFFIX';
+  /** Optional trainer (FR-COA-05); must be an active connection of the caller. */
+  trainerId?: string;
 }
+
+/** Owner = the trainee; TRAINER = the trainer assigned to the session (docs/12 §5 access matrix). */
+export type SessionRole = 'OWNER' | 'TRAINER';
 
 export interface PatchSessionInput {
   name?: string;
@@ -59,6 +65,7 @@ export const SESSION_COLUMNS = [
   'notes',
   'tags',
   'source',
+  'trainerId',
   'rowVersion',
   'createdAt',
   'updatedAt',
@@ -74,6 +81,7 @@ export class SessionService {
     @Inject(SERVICE_CONFIG) private readonly config: RecordsConfig,
     private readonly trackers: TrackerClient,
     private readonly events: SessionEvents,
+    private readonly profiles: ProfileClient,
   ) {}
 
   /**
@@ -96,6 +104,14 @@ export class SessionService {
     const schemaVersion = input.schemaVersion ?? latest.schemaVersion;
     if (schemaVersion > latest.schemaVersion)
       throw ProblemError.conflict('schema-version-unknown', `Tracker schema is at v${latest.schemaVersion}`);
+    if (input.trainerId) {
+      // FR-COA-05: only a trainer the trainee is actively connected with.
+      const ok = input.trainerId !== user.id && (await this.profiles.isConnected(input.trainerId, user.id));
+      if (!ok)
+        throw ProblemError.validation([
+          { pointer: '/body/trainerId', code: 'not-connected', message: 'Choose one of your connected trainers' },
+        ]);
+    }
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -133,6 +149,7 @@ export class SessionService {
               notes: null,
               tags: [],
               source: input.source ?? 'MOBILE',
+              trainerId: input.trainerId ?? null,
               rowVersion: 1,
               deletedAt: null,
             })
@@ -154,18 +171,60 @@ export class SessionService {
     throw ProblemError.conflict('session-name-taken', 'Could not reserve a session name; retry');
   }
 
+  /** Owner or assigned trainer (also after a disconnect: the trainer keeps their coaching history, FR-COA-10). */
   async get(user: AuthUser, id: string, includeEntries: boolean) {
-    const session = await this.loadOwned(this.db, user, id);
-    if (!includeEntries) return session;
+    const { session, role } = await this.loadAccessible(this.db, user, id);
+    if (!includeEntries) return { ...session, myRole: role };
     const entries = await this.db
       .selectFrom('activityEntry')
-      .select(['id', 'clientEntryId', 'activityCode', 'seqNo', 'groupNo', 'recordedAt', 'values', 'rowVersion'])
+      .select([
+        'id',
+        'clientEntryId',
+        'activityCode',
+        'seqNo',
+        'groupNo',
+        'recordedAt',
+        'values',
+        'rowVersion',
+        'recordedBy',
+      ])
       .where('sessionId', '=', id)
       .where('sessionDate', '=', session.sessionDate)
       .where('deletedAt', 'is', null)
       .orderBy('seqNo')
       .execute();
-    return { ...session, entries };
+    return { ...session, myRole: role, entries };
+  }
+
+  /** The pinned schema of a session, for the owner or the assigned trainer (trainers cannot read the tracker). */
+  async schema(user: AuthUser, id: string) {
+    const { session } = await this.loadAccessible(this.db, user, id);
+    return this.trackers.schema(session.trackerId, session.schemaVersion);
+  }
+
+  /**
+   * FR-COA-06/08: sessions where the caller is the trainer. "Live now" = status IN_PROGRESS (last 2 days, so
+   * only the newest partitions are read); otherwise one trainee's history, newest first.
+   */
+  async listCoaching(
+    user: AuthUser,
+    q: { status?: 'IN_PROGRESS' | 'COMPLETED'; traineeId?: string; from?: string; to?: string; limit: number },
+  ) {
+    const days = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    const from = q.from ?? (q.status === 'IN_PROGRESS' ? days(2) : days(365));
+    const to = q.to ?? new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    let query = this.db
+      .selectFrom('activitySession')
+      .select([...SESSION_COLUMNS])
+      .where('trainerId', '=', user.id)
+      .where('deletedAt', 'is', null)
+      .where('sessionDate', '>=', from)
+      .where('sessionDate', '<=', to);
+    if (q.traineeId) query = query.where('userId', '=', q.traineeId);
+    if (q.status) query = query.where('status', '=', q.status);
+    else query = query.where('status', '<>', 'DISCARDED');
+    const items = await query.orderBy('sessionDate', 'desc').orderBy('startedAt', 'desc').limit(q.limit).execute();
+    return { items };
   }
 
   /**
@@ -351,7 +410,7 @@ export class SessionService {
     input: { endedAt: string; entryCount: number; clientEntryIds?: string[] },
   ) {
     return this.db.transaction().execute(async (trx) => {
-      const s = await this.lockOwned(trx, user, id, undefined);
+      const s = await this.lockForRecording(trx, user, id);
       if (s.status === 'COMPLETED') return s;
       if (s.status !== 'IN_PROGRESS') throw ProblemError.conflict('not-in-progress', `Session is ${s.status}`);
       const live = await trx
@@ -361,9 +420,11 @@ export class SessionService {
         .where('sessionDate', '=', s.sessionDate)
         .where('deletedAt', 'is', null)
         .execute();
-      if (live.length !== input.entryCount) {
-        const have = new Set(live.map((r) => r.clientEntryId));
-        const missing = (input.clientEntryIds ?? []).filter((c) => !have.has(c));
+      // Two devices may record into one session (trainee + trainer, FR-COA-07): what matters is that every entry
+      // this device logged is on the server; entries from the other device are expected extras.
+      const have = new Set(live.map((r) => r.clientEntryId));
+      const missing = (input.clientEntryIds ?? []).filter((c) => !have.has(c));
+      if (missing.length || (!input.clientEntryIds && live.length < input.entryCount)) {
         throw ProblemError.conflict('entries-missing', `Server has ${live.length} of ${input.entryCount} entries`, {
           serverEntryCount: live.length,
           missingClientEntryIds: missing,
@@ -381,7 +442,7 @@ export class SessionService {
         .where('id', '=', id)
         .where('sessionDate', '=', s.sessionDate)
         .execute();
-      const done = await this.loadOwned(trx, user, id);
+      const { session: done } = await this.loadAccessible(trx, user, id);
       await this.events.completed(trx, done);
       return done;
     });
@@ -426,6 +487,41 @@ export class SessionService {
       .executeTakeFirst();
     if (!s) throw ProblemError.notFound(`Session ${id}`);
     return s;
+  }
+
+  /** Owner or assigned trainer; anyone else gets 404 so session ids cannot be probed. */
+  async loadAccessible(db: Kysely<RecordsDatabase> | Trx, user: AuthUser, id: string) {
+    const loc = await db
+      .selectFrom('sessionLocator')
+      .select(['userId', 'sessionDate'])
+      .where('sessionId', '=', id)
+      .executeTakeFirst();
+    if (!loc) throw ProblemError.notFound(`Session ${id}`);
+    const session = await db
+      .selectFrom('activitySession')
+      .select([...SESSION_COLUMNS])
+      .where('id', '=', id)
+      .where('sessionDate', '=', loc.sessionDate)
+      .where('deletedAt', 'is', null)
+      .executeTakeFirst();
+    const role: SessionRole | null =
+      session?.userId === user.id ? 'OWNER' : session?.trainerId && session.trainerId === user.id ? 'TRAINER' : null;
+    if (!session || !role) throw ProblemError.notFound(`Session ${id}`);
+    return { session, role };
+  }
+
+  /**
+   * Who may add entries or complete: the owner, or the assigned trainer while still connected (FR-COA-07/10).
+   * Locks the session row. A disconnected trainer gets 403 (they can still read the session).
+   */
+  async lockForRecording(trx: Trx, user: AuthUser, id: string) {
+    const { session, role } = await this.loadAccessible(trx, user, id);
+    if (role === 'TRAINER' && !(await this.profiles.isConnected(user.id, session.userId)))
+      throw ProblemError.forbidden('You are no longer connected with this trainee');
+    await sql`SELECT 1 FROM activity_session WHERE id = ${id} AND session_date = ${session.sessionDate} FOR UPDATE`.execute(
+      trx,
+    );
+    return (await this.loadAccessible(trx, user, id)).session;
   }
 
   async lockOwned(trx: Trx, user: AuthUser, id: string, ifMatch: number | undefined) {

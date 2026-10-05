@@ -1,6 +1,8 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { PlatformModule } from '@trainme/service-kit';
 import { AnalyticsController } from './api/analytics.controller.js';
+import { CoachingController } from './api/coaching.controller.js';
+import { CoachingAnalyticsService } from './application/coaching-analytics.service.js';
 import { AnalyticsQueryService } from './application/analytics-query.service.js';
 import { ProjectionService } from './application/projection.service.js';
 import { RecordEventsConsumer } from './application/record-events.consumer.js';
@@ -23,8 +25,14 @@ export class AppModule {
           config,
         }),
       ],
-      controllers: [AnalyticsController],
-      providers: [AnalyticsQueryService, ProjectionService, RecordEventsConsumer, TrackerClient],
+      controllers: [AnalyticsController, CoachingController],
+      providers: [
+        CoachingAnalyticsService,
+        AnalyticsQueryService,
+        ProjectionService,
+        RecordEventsConsumer,
+        TrackerClient,
+      ],
     };
   }
 }

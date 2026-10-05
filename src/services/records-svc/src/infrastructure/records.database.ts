@@ -26,6 +26,7 @@ export interface ActivitySessionTable {
   notes: string | null;
   tags: string[];
   source: 'MOBILE' | 'WEB' | 'IMPORT';
+  trainerId: string | null;
   rowVersion: number;
   deletedAt: Date | null;
   createdAt: ColumnType<Date, never, never>;
@@ -49,14 +50,28 @@ export interface ActivityEntryTable {
   groupNo: number | null;
   recordedAt: Date;
   values: Json<Record<string, unknown>>;
+  recordedBy: string | null;
   rowVersion: number;
   deletedAt: Date | null;
+}
+
+export interface SessionFeedbackTable {
+  id: string;
+  sessionId: string;
+  sessionDate: string;
+  traineeId: string;
+  authorId: string;
+  clientEntryId: string | null;
+  body: string;
+  createdAt: ColumnType<Date, never, never>;
+  updatedAt: ColumnType<Date, never, Date>;
 }
 
 export interface RecordsDatabase {
   activitySession: ActivitySessionTable;
   sessionLocator: SessionLocatorTable;
   activityEntry: ActivityEntryTable;
+  sessionFeedback: SessionFeedbackTable;
   outboxEvent: OutboxEventTable;
   processedEvent: ProcessedEventTable;
 }

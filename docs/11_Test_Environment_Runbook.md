@@ -118,9 +118,16 @@ The realm `trainme` is imported on Keycloak start with these dummy users (`src/d
 | `asha@trainme.test` | member | PRO | normal user (cricket bowler) |
 | `ravi@trainme.test` | member | FREE | free-plan limits |
 | `meera@trainme.test` | member | ELITE | top plan |
-| `coach@trainme.test` | member, curator | PRO | Admin Console / catalog publishing |
+| `coach@trainme.test` | member (trainer) | PRO | Coach Carter – coaching (trainer) |
+| `coach2@trainme.test` | member (trainer) | PRO | Kiran Rao – second trainer (isolation tests) |
+| `coach3@trainme.test` | member (trainer) | FREE | Dev Mehta – third trainer (isolation tests) |
 | `support@trainme.test` | member, support | FREE | support views |
-| `admin@trainme.test` | member, admin, curator | ELITE | everything |
+| `admin@trainme.test` | member, admin, curator | ELITE | Admin Console, catalog publishing – technical only |
+
+**Technical vs end-user accounts:** `admin@`, `support@` (and any `curator`) run the application – they never coach and
+never train with a coach (enforced: `403`). Coaches are ordinary members who turn on *I coach or train others*.
+`coach2@` / `coach3@` exist from v1.4; on an older running Keycloak add them with the kcadm commands in §5.3
+(the realm file is imported only on the first start).
 
 Password for all: **`Passw0rd!`** (`TEST_USER_PASSWORD` in `.env`).
 
@@ -386,9 +393,41 @@ Push is logged as `SKIPPED` until FCM/APNs keys exist; email goes to Mailpit in 
 | Session | log balls (yorker attempted → accurate appears), watch live stats, *End session* |
 | Charts | yorker accuracy daily/weekly/monthly with "n of m"; sessions of a day |
 | Profile / Plan / Inbox | Imperial units, mock checkout, reminders and quiet hours |
-| Admin (`coach@`) | publish / retire template versions |
+| Admin (`admin@`) | publish / retire template versions |
 
 ---
+
+### 6.9 Trainers and coaching ✅ (v1.4 – docs/12)
+
+| Method | Path | Description |
+|---|---|---|
+| PUT | `/profiles/me/trainer` | `{isTrainer, bio, specialties}` – self-register as a trainer |
+| GET | `/profiles/trainers?q=` | find trainers by name or specialty |
+| GET / POST | `/profiles/connections` | my connections (`asTrainee`, `asTrainer`) · request `{trainerId}` or invite `{traineeEmail}` (trainers only) |
+| POST / DELETE | `/profiles/connections/{id}/accept\|decline` · `/profiles/connections/{id}` | answer (the side that did not ask) · disconnect |
+| POST | `/sessions` with `trainerId` | only an **active** connection (else 422) |
+| GET | `/sessions/coaching?status=IN_PROGRESS&traineeId=` | sessions where I am the trainer |
+| GET | `/sessions/{id}/schema` | pinned schema for owner or assigned trainer |
+| GET / POST / PATCH / DELETE | `/sessions/{id}/feedback[/{fid}]` | trainer writes (while connected), owner reads; `{body, clientEntryId?}` |
+| GET | `/analytics/coaching/trainees/{id}/trackers` · `/analytics/coaching/series?traineeId=&trackerId=&activity=&metric=` | trainer charts from **their** sessions only |
+
+Access rules: a trainer reads only sessions where they are `trainer_id` (others → 404), records only while the session is live
+**and** the connection is active (else 403), keeps read access after a disconnect. Entries logged by the trainer belong to the
+trainee and store `recorded_by`.
+
+**Walkthrough (two browsers or a private window):**
+1. `coach@` → Profile → *Coaching* → **I coach or train others** → bio, specialties → Save. *Coaching* appears in the menu.
+2. `meera@` → **My trainers** → search “coach” → **Request**. `coach@` → **Coaching** → **Accept**
+   (or: coach invites `meera@trainme.test` by e-mail; Meera accepts under My trainers).
+3. `meera@` → tracker → **Start a session** → *Trainer (optional)* = Coach Curator.
+4. `coach@` → **Coaching → Live now** (refreshes every 10 s) → **Join and record**. Both log balls – each screen shows the
+   other's within 5 s, tagged *by Coach Curator*.
+5. `coach@` → *Feedback* → about *Ball #1* or the whole session → **Send**. Meera gets an inbox notice and sees it on the session.
+6. `coach@` → **Coaching → Sessions & charts** for Meera: only sessions with the coach, charts from those sessions only.
+
+**Automated check:** `BASE_URL=https://localhost:8443 python3 src/deploy/compose/scripts/e2e-coaching.py` – 38 checks
+(trainers, connections, recording together, isolation between three trainers, feedback, notifications, disconnect).
+It uses meera@ with coach@, coach2@ and coach3@ as trainers (and checks that admin@ cannot coach); safe to re-run.
 
 ## 7. Health, readiness and metrics
 
@@ -509,7 +548,28 @@ docker compose logs -f kong                                # gateway access log
 docker compose logs keycloak | grep -E "ERROR|WARN"
 ```
 
-Change the log level: set `LOG_LEVEL=debug` in `.env`, then `docker compose up -d catalog-svc`.
+**Log files** (Compose): every service and the web app also write daily files to `src/deploy/compose/logs/<service>/`:
+`app.<yyyy-MM-dd>.<n>.log`, 14 days kept, `current.log` → today's file. Set by `LOG_DIR` (default `/var/log/trainme`,
+mounted from `./logs`); `LOG_DIR=` (empty) = stdout only. On Kubernetes `LOG_DIR` is empty – the cluster collects stdout.
+
+```bash
+cd src/deploy/compose
+tail -f logs/records-svc/current.log                              # one service
+tail -f logs/*/current.log | grep '"level":"error"'               # errors anywhere
+grep -h <x-request-id> logs/*/current.log                         # one browser action through web → services
+grep -h '"userId":"<id>"' logs/*/current.log | sort               # everything one user did
+```
+
+What is logged:
+- `info` – every change and decision: logins and logouts, trackers created or customised, sessions started, completed, reopened or deleted, entries saved, stats recalculated, personal bests, catalog items created, published or retired, payments, plans, reminders, events published and handled. Each request is one line with requestId, userId, status and ms.
+- `warn` – rejected requests (4xx), retries, payment or email problems.
+- `error` – failures with stack (5xx, upstream down, events sent to the DLQ).
+- `debug` – details: request URLs, why a request was rejected (field errors), cache hits, chart and search timings, upstream calls, each event received.
+
+Tokens, cookies, passwords and e-mail addresses are redacted.
+
+Change the level: `LOG_LEVEL=debug` in `.env` (all services), or for one service only:
+`LOG_LEVEL=debug docker compose -p trainme up -d --no-deps catalog-svc`. On Kubernetes edit `LOG_LEVEL` in the ConfigMap and restart the pod.
 
 ---
 

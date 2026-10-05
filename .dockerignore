@@ -7,3 +7,8 @@ design
 diagrams
 docs
 **/.env
+# Terraform provider binaries (hundreds of MB) and state never belong in an image
+**/.terraform
+**/*.tfstate*
+# runtime log files
+**/logs

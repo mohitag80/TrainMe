@@ -8,7 +8,9 @@ the container environment (`TRAINME_PUBLIC_URL`, `SERVICES_CLIENT_SECRET`, `TEST
 | asha@trainme.test    | member                 | PRO   |
 | ravi@trainme.test    | member                 | FREE  |
 | meera@trainme.test   | member                 | ELITE |
-| coach@trainme.test   | member, curator        | PRO   |
+| coach@trainme.test   | member (trainer)       | PRO   |
+| coach2@trainme.test  | member (trainer)       | PRO   |
+| coach3@trainme.test  | member (trainer)       | FREE  |
 | support@trainme.test | member, support        | FREE  |
 | admin@trainme.test   | member, admin, curator | ELITE |
 

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EntryValidator, evaluateMetric, type EffectiveActivity, type EffectiveParameter } from '@trainme/schema';
 import type { UnitPreferences } from '@trainme/units';
 import { ErrorBanner, Notice, Spinner } from '@/components/client-ui';
+import { FeedbackPanel } from '@/components/coaching/feedback-panel';
 import { Segmented, Switch } from '@/components/controls';
 import { Badge, Card, Empty, PageHeader } from '@/components/ui';
 import { api, ApiError, errorText } from '@/lib/client/api';
@@ -21,6 +22,25 @@ interface LocalState {
   pending: LocalEntry[];
   deletes: string[];
   batchSeq: number;
+}
+
+/** With a trainer, both devices save at once and read each other's entries this often (docs/12 §2). */
+const COACHED_SYNC_SECONDS = 5;
+
+/**
+ * Merges the server's entries into this device's list: entries logged on the other device are added, server
+ * versions replace synced copies, synced entries the other device deleted disappear; local unsaved work stays.
+ */
+function mergeServer(local: LocalEntry[], server: SessionEntry[], deleted: string[]): LocalEntry[] {
+  const onServer = new Map(server.map((e) => [e.clientEntryId, e]));
+  const kept = local
+    .filter((e) => !e.synced || e.errors || onServer.has(e.clientEntryId))
+    .map((e) => (e.synced && onServer.has(e.clientEntryId) ? { ...onServer.get(e.clientEntryId)!, synced: true } : e));
+  const known = new Set(kept.map((e) => e.clientEntryId));
+  const added = server
+    .filter((e) => !known.has(e.clientEntryId) && !deleted.includes(e.clientEntryId))
+    .map((e) => ({ ...e, synced: true }));
+  return [...kept, ...added].sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
 }
 
 const storageKey = (id: string) => `trainme:session:${id}`;
@@ -65,16 +85,31 @@ export default function SessionPage() {
   const [tracker, setTracker] = useState<TrackerDetail>();
   const [prefs, setPrefs] = useState<UnitPreferences>({});
   const [entries, setEntries] = useState<LocalEntry[]>([]);
+  const [people, setPeople] = useState<Record<string, string>>({});
   const [error, setError] = useState<unknown>();
 
   const load = useCallback(async () => {
     try {
       const s = await api<Session & { entries: SessionEntry[] }>(`/sessions/${id}?include=entries`);
-      const [sc, t, p] = await Promise.all([
-        api<TrackerSchema>(`/trackers/${s.trackerId}/schema?version=${s.schemaVersion}`),
-        api<TrackerDetail>(`/trackers/${s.trackerId}`),
+      // A trainer cannot read the trainee's tracker: the session serves its pinned schema instead.
+      const asTrainer = s.myRole === 'TRAINER';
+      const [sc, t, p, names] = await Promise.all([
+        asTrainer
+          ? api<TrackerSchema>(`/sessions/${id}/schema`)
+          : api<TrackerSchema>(`/trackers/${s.trackerId}/schema?version=${s.schemaVersion}`),
+        asTrainer
+          ? Promise.resolve({
+              id: s.trackerId,
+              displayName: 'Trainee session',
+              displayUnits: {},
+            } as unknown as TrackerDetail)
+          : api<TrackerDetail>(`/trackers/${s.trackerId}`),
         api<Profile>('/profiles/me'),
+        s.trainerId
+          ? api<{ items: { id: string; displayName: string }[] }>(`/profiles/names?ids=${s.trainerId},${s.userId}`)
+          : Promise.resolve({ items: [] }),
       ]);
+      setPeople(Object.fromEntries(names.items.map((n) => [n.id, n.displayName])));
       const local = loadLocal(id);
       const server: LocalEntry[] = s.entries.map((e) => ({ ...e, synced: true }));
       const pending = (local?.pending ?? []).filter(
@@ -104,6 +139,7 @@ export default function SessionPage() {
       prefs={prefs}
       entries={entries}
       setEntries={setEntries}
+      people={people}
       onDone={load}
     />
   ) : (
@@ -113,6 +149,7 @@ export default function SessionPage() {
       tracker={tracker}
       prefs={prefs}
       entries={entries}
+      people={people}
       onChanged={load}
     />
   );
@@ -127,6 +164,7 @@ function Recorder({
   prefs,
   entries,
   setEntries,
+  people,
   onDone,
 }: {
   session: Session;
@@ -135,9 +173,13 @@ function Recorder({
   prefs: UnitPreferences;
   entries: LocalEntry[];
   setEntries: React.Dispatch<React.SetStateAction<LocalEntry[]>>;
+  people: Record<string, string>;
   onDone: () => Promise<void>;
 }) {
   const router = useRouter();
+  const coached = !!session.trainerId;
+  const asTrainer = session.myRole === 'TRAINER';
+  const inFlight = useRef(false);
   const activities = useMemo(
     () =>
       schema.activities
@@ -203,6 +245,8 @@ function Recorder({
   const flush = useCallback(async () => {
     const pending = entries.filter((e) => !e.synced && !e.errors);
     if (pending.length === 0 && local.current.deletes.length === 0) return true;
+    if (inFlight.current) return true; // one save at a time; the next tick picks up the rest
+    inFlight.current = true;
     setSyncState('syncing');
     try {
       for (let i = 0; i < Math.max(pending.length, 1); i += 100) {
@@ -231,12 +275,14 @@ function Recorder({
       setSyncState('error');
       setSyncError(errorText(e));
       return false;
+    } finally {
+      inFlight.current = false;
     }
   }, [entries, persist, postBatch, setEntries]);
 
   // Periodic checkpoint, early flush when many are pending or the tab is hidden (FR-REC-10).
   useEffect(() => {
-    const timer = setInterval(() => void flush(), SYNC_SECONDS * 1000);
+    const timer = setInterval(() => void flush(), (coached ? COACHED_SYNC_SECONDS : SYNC_SECONDS) * 1000);
     const onHide = () => {
       if (document.visibilityState === 'hidden') void flush();
     };
@@ -245,17 +291,40 @@ function Recorder({
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onHide);
     };
-  }, [flush]);
+  }, [flush, coached]);
   useEffect(() => {
-    if (entries.filter((e) => !e.synced && !e.errors).length >= FLUSH_AT_PENDING) void flush();
-  }, [entries, flush]);
+    const waiting = entries.filter((e) => !e.synced && !e.errors).length;
+    // With a trainer every entry goes up at once, so the other device sees it within seconds.
+    if (waiting >= (coached ? 1 : FLUSH_AT_PENDING)) void flush();
+  }, [entries, flush, coached]);
+  // Coached session: pick up the other device's entries, and notice when the other side ends the session.
+  useEffect(() => {
+    if (!coached) return;
+    const t = setInterval(async () => {
+      try {
+        const s = await api<Session & { entries: SessionEntry[] }>(`/sessions/${session.id}?include=entries`);
+        if (s.status !== 'IN_PROGRESS') {
+          await onDone();
+          return;
+        }
+        setEntries((all) => mergeServer(all, s.entries, local.current.deletes));
+      } catch {
+        // Offline for a moment: the next tick tries again.
+      }
+    }, COACHED_SYNC_SECONDS * 1000);
+    return () => clearInterval(t);
+  }, [coached, session.id, onDone, setEntries]);
   useEffect(() => {
     const started = Date.parse(session.startedAt);
     const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
     return () => clearInterval(t);
   }, [session.startedAt]);
 
-  const activityEntries = entries.filter((e) => e.activityCode === activity.code);
+  // In time order: with a trainer two devices log into one session, so numbers follow when each ball was bowled.
+  const activityEntries = entries
+    .filter((e) => e.activityCode === activity.code)
+    .sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
+  const numberOf = new Map(activityEntries.map((e, i) => [e.clientEntryId, i + 1]));
 
   /** Validates with the shared schema validator, converts display units to canonical and stores locally. */
   function logEntry(repeat?: Record<string, unknown>) {
@@ -374,7 +443,15 @@ function Recorder({
   return (
     <div className="stack">
       <nav className="crumbs">
-        <Link href={`/trackers/${tracker.id}`}>{tracker.displayName}</Link> <span>›</span> {session.name}
+        {asTrainer ? (
+          <>
+            <Link href="/coaching">Coaching</Link> <span>›</span>{' '}
+            <Link href={`/coaching/${session.userId}`}>{people[session.userId ?? ''] ?? 'Trainee'}</Link>
+          </>
+        ) : (
+          <Link href={`/trackers/${tracker.id}`}>{tracker.displayName}</Link>
+        )}{' '}
+        <span>›</span> {session.name}
       </nav>
       <PageHeader
         title={session.name}
@@ -402,7 +479,7 @@ function Recorder({
             <button className="btn btn-ghost" onClick={() => void flush()}>
               Save now
             </button>
-            {entries.length === 0 && (
+            {entries.length === 0 && !asTrainer && (
               <button
                 className="btn btn-danger"
                 onClick={async () => {
@@ -420,6 +497,13 @@ function Recorder({
         }
       />
       {syncError && <Notice tone="bad">{syncError}</Notice>}
+      {coached && (
+        <Notice tone="ok">
+          {asTrainer
+            ? `You are recording for ${people[session.userId ?? ''] ?? 'your trainee'} – both of you can log; each screen updates within ${COACHED_SYNC_SECONDS} seconds.`
+            : `Training with ${people[session.trainerId ?? ''] ?? 'your trainer'} – they can follow and log in this session too.`}
+        </Notice>
+      )}
       {activities.length > 1 && (
         <div className="activity-pills" role="tablist" aria-label="Activity">
           {activities.map((a) => {
@@ -480,7 +564,7 @@ function Recorder({
                   <div className="entry-seq">
                     {activity.grouping && e.groupNo
                       ? `${e.groupNo}.${((e.seqNo - 1) % activity.grouping.size) + 1}`
-                      : `#${e.seqNo}`}
+                      : `#${numberOf.get(e.clientEntryId) ?? e.seqNo}`}
                   </div>
                   <div className="entry-vals">
                     <EntryChips
@@ -490,6 +574,9 @@ function Recorder({
                       prefs={prefs}
                     />
                     {e.errors && <div className="field-error">{e.errors.join('; ')}</div>}
+                    {coached && e.recordedBy && e.recordedBy !== session.userId && (
+                      <span className="tag">by {people[e.recordedBy] ?? 'trainer'}</span>
+                    )}
                   </div>
                   <div className="row gap">
                     <span
@@ -504,6 +591,16 @@ function Recorder({
               ))
             )}
           </Card>
+          {coached && (
+            <FeedbackPanel
+              session={session}
+              entries={entries}
+              activities={activities}
+              people={people}
+              canWrite={asTrainer}
+              live
+            />
+          )}
         </div>
       </div>
     </div>
@@ -762,6 +859,7 @@ function SessionSummary({
   tracker,
   prefs,
   entries,
+  people,
   onChanged,
 }: {
   session: Session;
@@ -769,8 +867,11 @@ function SessionSummary({
   tracker: TrackerDetail;
   prefs: UnitPreferences;
   entries: LocalEntry[];
+  people: Record<string, string>;
   onChanged: () => Promise<void>;
 }) {
+  const asTrainer = session.myRole === 'TRAINER';
+  const traineeName = people[session.userId ?? ''] ?? 'Trainee';
   const [notes, setNotes] = useState(session.notes ?? '');
   const [msg, setMsg] = useState<string>();
   const used = schema.activities.filter((a) => entries.some((e) => e.activityCode === a.code));
@@ -794,7 +895,7 @@ function SessionSummary({
     month: '2-digit',
     day: '2-digit',
   }).format(new Date());
-  const canResume = session.status === 'COMPLETED' && session.sessionDate === today;
+  const canResume = !asTrainer && session.status === 'COMPLETED' && session.sessionDate === today;
   async function resume() {
     try {
       await api(`/sessions/${session.id}/reopen`, { method: 'POST' });
@@ -811,26 +912,39 @@ function SessionSummary({
   return (
     <div className="stack">
       <nav className="crumbs">
-        <Link href={`/trackers/${tracker.id}`}>{tracker.displayName}</Link> <span>›</span> {session.name}
+        {asTrainer ? (
+          <>
+            <Link href="/coaching">Coaching</Link> <span>›</span>{' '}
+            <Link href={`/coaching/${session.userId}`}>{traineeName}</Link>
+          </>
+        ) : (
+          <Link href={`/trackers/${tracker.id}`}>{tracker.displayName}</Link>
+        )}{' '}
+        <span>›</span> {session.name}
       </nav>
       <PageHeader
         title={session.name}
-        subtitle={`${when} · ${session.entryCount} ${session.entryCount === 1 ? 'entry' : 'entries'}${session.isAutoClosed ? ' · closed automatically' : ''}`}
+        subtitle={`${asTrainer ? `${traineeName} · ` : ''}${when} · ${session.entryCount} ${session.entryCount === 1 ? 'entry' : 'entries'}${session.trainerId && !asTrainer ? ` · with ${people[session.trainerId] ?? 'your trainer'}` : ''}${session.isAutoClosed ? ' · closed automatically' : ''}`}
         actions={
           <>
             <Badge tone={session.status === 'COMPLETED' ? 'ok' : 'default'}>
               {session.status === 'COMPLETED' ? 'Completed' : 'Discarded'}
             </Badge>
-            <button
-              className="btn"
-              onClick={() => {
-                const n = prompt('Session name', session.name);
-                if (n?.trim()) void save({ name: n.trim() });
-              }}
+            {!asTrainer && (
+              <button
+                className="btn"
+                onClick={() => {
+                  const n = prompt('Session name', session.name);
+                  if (n?.trim()) void save({ name: n.trim() });
+                }}
+              >
+                Rename
+              </button>
+            )}
+            <Link
+              className={canResume ? 'btn' : 'btn btn-primary'}
+              href={asTrainer ? `/coaching/${session.userId}` : `/trackers/${tracker.id}/charts`}
             >
-              Rename
-            </button>
-            <Link className={canResume ? 'btn' : 'btn btn-primary'} href={`/trackers/${tracker.id}/charts`}>
               📈 Charts
             </Link>
             {canResume && (
@@ -844,7 +958,9 @@ function SessionSummary({
       {msg && <Notice>{msg}</Notice>}
       {used.length === 0 && <Empty>This session has no entries.</Empty>}
       {used.map((a) => {
-        const rows = entries.filter((e) => e.activityCode === a.code);
+        const rows = entries
+          .filter((e) => e.activityCode === a.code)
+          .sort((x, y) => x.recordedAt.localeCompare(y.recordedAt));
         const metrics = a.metrics
           .filter((m) => !m.hidden)
           .map((m) => ({
@@ -876,10 +992,15 @@ function SessionSummary({
             {rows.map((e) => (
               <div key={e.clientEntryId} className="entry-row">
                 <div className="entry-seq">
-                  {a.grouping && e.groupNo ? `${e.groupNo}.${((e.seqNo - 1) % a.grouping.size) + 1}` : `#${e.seqNo}`}
+                  {a.grouping && e.groupNo
+                    ? `${e.groupNo}.${((e.seqNo - 1) % a.grouping.size) + 1}`
+                    : `#${rows.indexOf(e) + 1}`}
                 </div>
                 <div className="entry-vals">
                   <EntryChips activity={a} values={e.values} displayUnits={tracker.displayUnits} prefs={prefs} />
+                  {session.trainerId && e.recordedBy && e.recordedBy !== session.userId && (
+                    <span className="tag">by {people[e.recordedBy] ?? 'trainer'}</span>
+                  )}
                 </div>
                 <span />
               </div>
@@ -887,18 +1008,32 @@ function SessionSummary({
           </Card>
         );
       })}
-      <Card title="Notes">
-        <textarea
-          rows={3}
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          maxLength={2000}
-          placeholder="What did you work on?"
+      {session.trainerId && (
+        <FeedbackPanel
+          session={session}
+          entries={entries}
+          activities={schema.activities}
+          people={people}
+          canWrite={asTrainer}
+          live={false}
         />
-        <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => save({ notes })}>
-          Save notes
-        </button>
-      </Card>
+      )}
+      {asTrainer ? (
+        session.notes && <Card title={`${traineeName}'s notes`}>{session.notes}</Card>
+      ) : (
+        <Card title="Notes">
+          <textarea
+            rows={3}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            maxLength={2000}
+            placeholder="What did you work on?"
+          />
+          <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => save({ notes })}>
+            Save notes
+          </button>
+        </Card>
+      )}
     </div>
   );
 }

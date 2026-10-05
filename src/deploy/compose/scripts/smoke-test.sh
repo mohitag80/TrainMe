@@ -26,9 +26,9 @@ echo "Stack: $BASE_URL"
 echo "Identity"
 check "OIDC discovery" 200 "$BASE_URL/auth/realms/trainme/.well-known/openid-configuration"
 MEMBER=$(token asha@trainme.test)
-CURATOR=$(token coach@trainme.test)
+CURATOR=$(token admin@trainme.test)
 [ -n "$MEMBER" ] && echo "  ✅ token for asha@trainme.test (member)" || { echo "  ❌ token for asha@trainme.test"; fails=$((fails + 1)); }
-[ -n "$CURATOR" ] && echo "  ✅ token for coach@trainme.test (curator)" || { echo "  ❌ token for coach@trainme.test"; fails=$((fails + 1)); }
+[ -n "$CURATOR" ] && echo "  ✅ token for admin@trainme.test (admin, curator)" || { echo "  ❌ token for admin@trainme.test"; fails=$((fails + 1)); }
 
 echo "catalog-svc"
 check "units" 200 "$API/units"
