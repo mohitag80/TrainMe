@@ -537,7 +537,8 @@ Base URL: `https://api.<env>.trainme.app/api/v1`. Auth: `Authorization: Bearer <
 | Method | Path | Description |
 |---|---|---|
 | GET | `/profiles/me` | Get own profile |
-| PUT | `/profiles/me` | Create/update profile (upsert, id = token `sub`), including `unitPreferences` (§3.1) |
+| PUT | `/profiles/me` | Create/update profile (upsert, id = token `sub`): personal details (first/middle/last name, mobile, address, date of birth, gender, height, weight – v1.5) and settings (`unitPreferences` §3.1, `timezone`) |
+| GET / PUT / DELETE | `/profiles/me/avatar` | Optional profile picture (v1.5): PUT a JPEG/PNG/WebP data URL ≤ 150 KB, stored in `user_avatar` (BYTEA, one row per user); GET returns the image |
 | POST | `/profiles/me/devices` | Register device + push token |
 | DELETE | `/profiles/me/devices/{deviceId}` | Unregister device |
 | POST | `/profiles/me/export` | Request data export (202 + job id) |

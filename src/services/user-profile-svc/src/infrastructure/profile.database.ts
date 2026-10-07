@@ -12,6 +12,17 @@ export interface UserProfileTable {
   id: string;
   email: string | null;
   displayName: string;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  mobile: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  country: string | null;
+  avatarUpdatedAt: Date | null;
   dateOfBirth: string | null;
   gender: 'FEMALE' | 'MALE' | 'NON_BINARY' | 'UNDISCLOSED' | null;
   heightCm: number | null;
@@ -51,6 +62,13 @@ export interface DataRequestTable {
   details: Json<Record<string, unknown>>;
 }
 
+export interface UserAvatarTable {
+  userId: string;
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp';
+  data: Buffer;
+  updatedAt: Defaulted<Date>;
+}
+
 export type ConnectionStatus = 'PENDING' | 'ACTIVE' | 'DECLINED' | 'ENDED';
 
 export interface TrainerConnectionTable {
@@ -68,6 +86,7 @@ export interface TrainerConnectionTable {
 export interface ProfileDatabase {
   userProfile: UserProfileTable;
   trainerConnection: TrainerConnectionTable;
+  userAvatar: UserAvatarTable;
   userDevice: UserDeviceTable;
   dataRequest: DataRequestTable;
   outboxEvent: OutboxEventTable;

@@ -103,7 +103,7 @@ Priority uses **MoSCoW** (M = Must, S = Should, C = Could). Each requirement has
 
 | ID | Requirement | Priority | Acceptance criteria |
 |---|---|---|---|
-| FR-PRF-01 | Users create/edit a profile: display name, avatar, date of birth, gender (optional), height, weight, unit preferences (FR-PRF-06), timezone, locale. | M | Values validated; unit switch converts display only, never stored values. |
+| FR-PRF-01 | Users create/edit a **profile that identifies them** (v1.5): first name, middle name (optional), last name, mobile number, e-mail (the sign-in address, read-only), address (line 1, line 2 optional, city, state optional, postal code, country), date of birth, gender, height, weight, and an optional profile picture. Unit preferences (FR-PRF-06) and time zone are on a separate **Settings** page, not on the profile. | M | Required fields are checked before saving; mobile has 7–15 digits; date of birth is in the past; the picture is cropped to a square and stored at ≤ 150 KB; the display name follows first + last name. |
 | FR-PRF-02 | Users choose one or more interests (e.g. Gym, Cricket, Diet) during onboarding to personalise the catalog. | S | Onboarding recommends matching templates. |
 | FR-PRF-03 | Users can **export** all their data (JSON / CSV). | M | Export ready within 24 h, download link valid 7 days. |
 | FR-PRF-04 | Users can **delete** their account and all personal data (right to erasure). | M | Personal data removed or crypto-shredded within 30 days; confirmation email sent. |

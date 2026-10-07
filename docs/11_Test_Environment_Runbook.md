@@ -353,7 +353,8 @@ Values are in canonical units (km/h, kg …); the apps convert to the user's uni
 
 | Method | Path | Description |
 |---|---|---|
-| GET / PUT | `/profiles/me` | profile (created on first call); `{"unitPreset":"IMPERIAL","unitPreferences":{"speed":"METRIC"}}` (`If-Match`) |
+| GET / PUT | `/profiles/me` | profile (created on first call; `coachingRole` = TRAINER / TRAINEE / NONE / TECHNICAL). Personal details: `{"firstName","middleName","lastName","mobile","dateOfBirth","gender","heightCm","weightKg","addressLine1","addressLine2","city","state","postalCode","country"}` – blank optional text clears it, the display name becomes first + last. Settings: `{"timezone":"Asia/Kolkata","unitPreset":"IMPERIAL","unitPreferences":{"speed":"METRIC"}}` (`If-Match`) |
+| GET / PUT / DELETE | `/profiles/me/avatar` | profile picture: PUT `{"image":"data:image/jpeg;base64,…"}` (JPEG/PNG/WebP, ≤ 150 KB, else 422); GET returns the image (404 when none) |
 | GET / POST / DELETE | `/profiles/me/devices[/{id}]` | push tokens |
 | POST | `/profiles/me/export` | request a data export (202) |
 | DELETE | `/profiles/me` | erase account (202) → `user.deleted` saga across services |
@@ -392,7 +393,8 @@ Push is logged as `SKIPPED` until FCM/APNs keys exist; email goes to Mailpit in 
 | Tracker | add a parameter, hide one, switch speed to mph, start "Morning Nets" (try the same name twice) |
 | Session | log balls (yorker attempted → accurate appears), watch live stats, *End session* |
 | Charts | yorker accuracy daily/weekly/monthly with "n of m"; sessions of a day |
-| Profile / Plan / Inbox | Imperial units, mock checkout, reminders and quiet hours |
+| Profile | fill name, mobile, address, date of birth, gender, height, weight → *Save profile* (empty required fields are listed); *Upload picture* → shows in the sidebar |
+| Settings / Plan / Inbox | Imperial units and time zone, mock checkout, reminders and quiet hours |
 | Admin (`admin@`) | publish / retire template versions |
 
 ---
@@ -415,8 +417,12 @@ Access rules: a trainer reads only sessions where they are `trainer_id` (others 
 **and** the connection is active (else 403), keeps read access after a disconnect. Entries logged by the trainer belong to the
 trainee and store `recorded_by`.
 
+**Coach or trainee, never both (v1.5):** a coach has *Coaching* and no *My trainers*; a trainee has *My trainers* and no
+trainer switch on the Profile. Server answers: trainee turns on trainer status → 409 `trainee-cannot-coach`; coach requests
+a trainer or is invited → 403; coach with trainees turns trainer status off → 409 `coach-has-trainees`.
+
 **Walkthrough (two browsers or a private window):**
-1. `coach@` → Profile → *Coaching* → **I coach or train others** → bio, specialties → Save. *Coaching* appears in the menu.
+1. `coach@` → Profile → *Are you a coach?* → **I coach or train others** → bio, specialties → Save. *Coaching* replaces *My trainers* in the menu.
 2. `meera@` → **My trainers** → search “coach” → **Request**. `coach@` → **Coaching** → **Accept**
    (or: coach invites `meera@trainme.test` by e-mail; Meera accepts under My trainers).
 3. `meera@` → tracker → **Start a session** → *Trainer (optional)* = Coach Curator.
@@ -425,8 +431,9 @@ trainee and store `recorded_by`.
 5. `coach@` → *Feedback* → about *Ball #1* or the whole session → **Send**. Meera gets an inbox notice and sees it on the session.
 6. `coach@` → **Coaching → Sessions & charts** for Meera: only sessions with the coach, charts from those sessions only.
 
-**Automated check:** `BASE_URL=https://localhost:8443 python3 src/deploy/compose/scripts/e2e-coaching.py` – 38 checks
-(trainers, connections, recording together, isolation between three trainers, feedback, notifications, disconnect).
+**Automated check:** `BASE_URL=https://localhost:8443 python3 src/deploy/compose/scripts/e2e-coaching.py` – 49 checks
+(trainers, connections, recording together, isolation between three trainers, feedback, notifications, disconnect,
+coach-or-trainee rules).
 It uses meera@ with coach@, coach2@ and coach3@ as trainers (and checks that admin@ cannot coach); safe to re-run.
 
 ## 7. Health, readiness and metrics
@@ -616,6 +623,9 @@ BASE_URL=https://mohitconcert11.fyre.ibm.com:8443 src/deploy/compose/scripts/smo
 Checks login for a member and a curator, all catalog endpoints, typo search, and the 401 / 403 / 404 / 422
 error paths. Exit code 0 = all passed. The script grows with every service.
 
+Profile details, picture and settings: `BASE_URL=https://localhost:8443 python3 src/deploy/compose/scripts/e2e-profile.py`
+(16 checks, uses ravi@ and restores his name, units and time zone).
+
 ### 13.2 Manual checks (Phase 1)
 
 - [ ] `docker compose ps` – every container `healthy`
@@ -657,3 +667,4 @@ error paths. Exit code 0 = all passed. The script grows with every service.
 |---|---|
 | 2026-10-04 | First version: Phase 1 on the test VM (Compose), tokens, users, DBeaver, Kafka/cache, smoke test |
 | 2026-10-04 | 1.1: all service APIs (§6.2–6.7), web app (§6.8), analytics replay (§9.1), smoke test covers every service, new troubleshooting rows |
+| 2026-10-07 | 1.2: Profile = personal details + picture (`/profiles/me/avatar`), units and time zone moved to Settings; coach or trainee, never both (§6.9); `e2e-profile.py`; user-profile-svc migration V003 |

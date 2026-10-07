@@ -20,6 +20,15 @@ export const TECHNICAL_ROLES = ['admin', 'curator', 'support'] as const;
 export const isTechnical = (user: AuthUser) =>
   user.roles.some((r) => (TECHNICAL_ROLES as readonly string[]).includes(r));
 
+/**
+ * A person is either a coach or a trainee, never both (v1.5): TRAINER = trainer status on; TRAINEE = has a pending
+ * or active trainer; NONE = may still pick either; TECHNICAL = admin/curator/support, outside coaching.
+ */
+export type CoachingRole = 'TRAINER' | 'TRAINEE' | 'NONE' | 'TECHNICAL';
+
+const OPEN: ConnectionStatus[] = ['PENDING', 'ACTIVE'];
+const COACH_NOT_TRAINEE = 'Coaches cannot be trainees of another coach';
+
 export interface TrainerInput {
   isTrainer: boolean;
   bio?: string | null;
@@ -39,7 +48,17 @@ export class CoachingService {
     private readonly profiles: ProfileService,
   ) {}
 
-  /** FR-COA-01: self-service trainer status with a short bio and specialties. */
+  /** The caller's side in coaching – drives which coaching screens the web app shows (FR-COA-01, v1.5). */
+  async roleOf(user: AuthUser, isTrainer: boolean): Promise<CoachingRole> {
+    if (isTechnical(user)) return 'TECHNICAL';
+    if (isTrainer) return 'TRAINER';
+    return (await this.openCount(this.db, 'traineeId', user.id)) > 0 ? 'TRAINEE' : 'NONE';
+  }
+
+  /**
+   * FR-COA-01: self-service trainer status with a short bio and specialties. A trainee (pending or active trainer)
+   * cannot become a coach, and a coach with trainees cannot stop being one until those connections end.
+   */
   async setTrainer(user: AuthUser, input: TrainerInput) {
     if (input.isTrainer && isTechnical(user)) {
       this.log.warn({ userId: user.id, roles: user.roles }, 'technical account tried to become a trainer');
@@ -48,6 +67,20 @@ export class CoachingService {
     await this.profiles.me(user); // creates the profile on first use
     const specialties = [...new Set((input.specialties ?? []).map((s) => s.trim()).filter(Boolean))].slice(0, 10);
     return this.db.transaction().execute(async (trx) => {
+      // Serialises with connect()/respond(), which lock the trainee's row before linking them to a trainer.
+      await sql`SELECT 1 FROM user_profile WHERE id = ${user.id} FOR UPDATE`.execute(trx);
+      if (input.isTrainer && (await this.openCount(trx, 'traineeId', user.id)) > 0) {
+        this.log.info({ userId: user.id }, 'trainee tried to become a trainer');
+        throw ProblemError.conflict(
+          'trainee-cannot-coach',
+          'You have a trainer, so you cannot coach others. Disconnect from your trainers first.',
+        );
+      }
+      if (!input.isTrainer && (await this.openCount(trx, 'trainerId', user.id)) > 0)
+        throw ProblemError.conflict(
+          'coach-has-trainees',
+          'You still have trainees. Disconnect from them on the Coaching page before you stop coaching.',
+        );
       await trx
         .updateTable('userProfile')
         .set({
@@ -161,6 +194,7 @@ export class CoachingService {
     if (isTechnical(user))
       throw ProblemError.forbidden('Admin, catalog and support accounts do not take part in coaching');
     if (input.trainerId) {
+      if (me.isTrainer) throw ProblemError.forbidden(COACH_NOT_TRAINEE);
       const trainer = await this.profileOf(this.db, input.trainerId);
       if (!trainer?.isTrainer) throw ProblemError.notFound('Trainer');
       [trainerId, traineeId] = [trainer.id, user.id];
@@ -177,6 +211,8 @@ export class CoachingService {
       // Same answer for unknown and existing addresses would leak nothing more – but users need to know why.
       if (!trainee) throw ProblemError.notFound('A TrainMe user with that e-mail address');
       [trainerId, traineeId] = [user.id, trainee.id];
+      if ((await this.profileOf(this.db, trainee.id))?.isTrainer)
+        throw ProblemError.forbidden(`That person is a coach. ${COACH_NOT_TRAINEE}.`);
     }
     if (trainerId === traineeId) throw ProblemError.badRequest('self-connection', 'You cannot connect with yourself');
 
@@ -196,6 +232,7 @@ export class CoachingService {
 
     try {
       return await this.db.transaction().execute(async (trx) => {
+        await this.assertNotCoach(trx, traineeId);
         const id = newId();
         await trx
           .insertInto('trainerConnection')
@@ -229,6 +266,7 @@ export class CoachingService {
       if (c.requestedBy === user.id) throw ProblemError.forbidden('The other person has to answer your request');
       if (answer === 'accept' && isTechnical(user))
         throw ProblemError.forbidden('Admin, catalog and support accounts do not take part in coaching');
+      if (answer === 'accept') await this.assertNotCoach(trx, c.traineeId);
       const status: ConnectionStatus = answer === 'accept' ? 'ACTIVE' : 'DECLINED';
       await trx
         .updateTable('trainerConnection')
@@ -288,6 +326,24 @@ export class CoachingService {
   }
 
   // ---------------------------------------------------------------- helpers
+
+  private async openCount(db: Db, side: 'trainerId' | 'traineeId', userId: string) {
+    const r = await db
+      .selectFrom('trainerConnection')
+      .select((eb) => eb.fn.countAll<string>().as('n'))
+      .where(side, '=', userId)
+      .where('status', 'in', OPEN)
+      .executeTakeFirstOrThrow();
+    return Number(r.n);
+  }
+
+  /** Locks the trainee's profile row (see setTrainer) and refuses when they are a coach. */
+  private async assertNotCoach(trx: Trx, traineeId: string) {
+    const row = await sql<{
+      is_trainer: boolean;
+    }>`SELECT is_trainer FROM user_profile WHERE id = ${traineeId} FOR SHARE`.execute(trx);
+    if (row.rows[0]?.is_trainer) throw ProblemError.forbidden(COACH_NOT_TRAINEE);
+  }
 
   private profileOf(db: Db, id: string) {
     return db

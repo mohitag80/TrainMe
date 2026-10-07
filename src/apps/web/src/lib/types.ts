@@ -70,10 +70,26 @@ export interface SessionEntry {
   recordedBy?: string | null;
 }
 
+export type CoachingRole = 'TRAINER' | 'TRAINEE' | 'NONE' | 'TECHNICAL';
+
 export interface Profile {
   id: string;
   email: string | null;
   displayName: string;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  mobile: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  country: string | null;
+  dateOfBirth: string | null;
+  gender: 'FEMALE' | 'MALE' | 'NON_BINARY' | 'UNDISCLOSED' | null;
+  /** Set while a profile picture exists; also its cache-busting version. */
+  avatarUpdatedAt: string | null;
   unitPreferences: Partial<Record<string, 'METRIC' | 'IMPERIAL'>>;
   timezone: string;
   locale: string;
@@ -84,6 +100,8 @@ export interface Profile {
   isTrainer?: boolean;
   /** False for technical accounts (admin, curator, support): they never coach or train with a coach. */
   canCoach?: boolean;
+  /** Coach or trainee, never both: decides which coaching screens appear. */
+  coachingRole?: CoachingRole;
   trainerBio?: string | null;
   trainerSpecialties?: string[];
   rowVersion: number;

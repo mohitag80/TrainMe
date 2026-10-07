@@ -1,6 +1,7 @@
-import { Badge, Logo } from '@/components/ui';
+import { Avatar, Badge, Logo } from '@/components/ui';
 import { Nav } from '@/components/nav';
 import { api, requireSession } from '@/lib/server/api';
+import type { CoachingRole } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,9 +12,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     api<{ unread: number }>('/notifications?limit=1')
       .then((r) => r.unread)
       .catch(() => 0),
-    api<{ isTrainer?: boolean; canCoach?: boolean }>('/profiles/me').catch(() => ({
-      isTrainer: false,
-      canCoach: false,
+    api<{ coachingRole?: CoachingRole; avatarUpdatedAt?: string | null }>('/profiles/me').catch(() => ({
+      coachingRole: 'TECHNICAL' as const,
+      avatarUpdatedAt: null,
     })),
   ]);
   const u = session.user;
@@ -23,15 +24,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <Logo />
         <Nav
           isCurator={u.roles.includes('curator') || u.roles.includes('admin')}
-          isTrainer={!!me.isTrainer && me.canCoach !== false}
-          canCoach={me.canCoach !== false}
+          coachingRole={me.coachingRole ?? 'TECHNICAL'}
           unread={unread}
         />
         <div className="sidebar-foot">
-          <div>
-            <div style={{ fontWeight: 700 }}>{u.name}</div>
-            <div className="row gap small muted">
-              {u.email} <Badge tone="brand">{u.plan}</Badge>
+          <div className="user-chip">
+            <Avatar name={u.name} version={me.avatarUpdatedAt} size={36} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700 }}>{u.name}</div>
+              <div className="row gap small muted">
+                {u.email} <Badge tone="brand">{u.plan}</Badge>
+              </div>
             </div>
           </div>
           <form action="/bff/auth/logout" method="post">

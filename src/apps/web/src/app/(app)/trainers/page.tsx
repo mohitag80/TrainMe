@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ErrorBanner, Notice, Spinner } from '@/components/client-ui';
 import { Badge, Card, Empty, PageHeader } from '@/components/ui';
@@ -47,6 +48,17 @@ export default function TrainersPage() {
       <div className="stack">
         <PageHeader title="My trainers" />
         <Empty>Admin, catalog and support accounts do not take part in coaching. Use a personal account.</Empty>
+      </div>
+    );
+  // A coach never has a coach of their own (v1.5); the menu hides this page, this covers a typed URL.
+  if (me.data.coachingRole === 'TRAINER')
+    return (
+      <div className="stack">
+        <PageHeader title="My trainers" />
+        <Empty>
+          You are a coach, and coaches cannot be trainees of another coach. Your trainees are on the{' '}
+          <Link href="/coaching">Coaching</Link> page.
+        </Empty>
       </div>
     );
   const mine = conns.data.asTrainee;

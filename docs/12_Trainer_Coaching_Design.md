@@ -16,7 +16,8 @@ review results and give feedback, but only for sessions the trainee assigned to 
 
 | ID | Requirement |
 |---|---|
-| FR-COA-01 | Any user can **register as a trainer** from their profile (self-service, no admin approval). A trainer adds a short bio and specialties. A trainer can also train as a normal user. |
+| FR-COA-01 | Any user who is not a trainee can **register as a trainer** from their profile (self-service, no admin approval). A trainer adds a short bio and specialties. A trainer can still record their own sessions. |
+| FR-COA-13 | **Coach or trainee, never both (v1.5).** A trainee (anyone with a pending or active trainer) cannot become a coach, and a coach cannot become a trainee of another coach – neither by requesting a trainer nor by accepting an invitation. A coach who still has trainees cannot stop coaching until those connections end. Coaches never see *My trainers*; trainees never see *Coaching* or the trainer switch. |
 | FR-COA-02 | A trainee can **find trainers** by name or specialty and **send a connection request**. |
 | FR-COA-03 | A trainer can **invite a trainee** by the trainee's e-mail address (the account must exist). |
 | FR-COA-04 | The other side **accepts or declines**. Either side can **disconnect** at any time. |
@@ -37,6 +38,7 @@ Non-functional: no extra round trip on the trainee's recording path; access chec
 | Topic | Decision | Why |
 |---|---|---|
 | Technical accounts | `admin`, `curator` and `support` accounts never coach and never train with a coach: becoming a trainer, requesting and accepting connections return 403, and the coaching menu is hidden (`canCoach=false` on `GET /profiles/me`). A coach is never given a technical role. | Admins run the application; coaching is for end users only (decision 2026-10-05). |
+| Coach or trainee | Exclusive (FR-COA-13). `GET /profiles/me` returns `coachingRole`: `TRAINER` (flag on), `TRAINEE` (has a pending/active trainer), `NONE` (may still choose), `TECHNICAL`. Server checks: trainer flag on → 403 for `POST /connections` as trainee and for invitations to that person, and accept re-checks it under a row lock; open trainer connections → 409 `trainee-cannot-coach` on `PUT /me/trainer`; open trainee connections → 409 `coach-has-trainees` when switching the flag off. | Clear roles (user decision 2026-10-07); enforced in the service, the web app only hides menus. |
 | Trainer status | A profile flag (`is_trainer`) in user-profile-svc, not a Keycloak role | Self-service with no token refresh; every permission is relationship-based anyway (connection or assigned session), so a role would add nothing. |
 | Where connections live | user-profile-svc (`trainer_connection`) | Connections are user-to-user relationships; no new service is needed for v1.4 (HLD §8 kept `team-svc` for teams/organisations later). |
 | Trainer on a session | `activity_session.trainer_id` in records-svc, validated at start through user-profile-svc | One synchronous check when the session starts; recording itself needs no extra call. |
@@ -149,8 +151,8 @@ CREATE INDEX ix_session_fact__trainer ON session_fact (trainer_id, user_id, trac
 
 ## 7. Screens (web)
 
-- **Profile → Trainer**: switch *I coach or train others*, bio, specialties.
-- **My trainers** (everyone): connected trainers, requests to accept, *Find a trainer* (search + Request), disconnect.
+- **Profile → Are you a coach? / Trainer details** (not shown to trainees): switch *I coach or train others*, bio, specialties.
+- **My trainers** (everyone except coaches): connected trainers, requests to accept, *Find a trainer* (search + Request), disconnect.
 - **Start session**: optional *Trainer* drop-down (connected trainers only).
 - **Coaching** (trainers only, in the sidebar): *Live now* (refreshes every 10 s) · *My trainees* (invite by e-mail, pending) · trainee page with sessions (with this trainer) and charts limited to them.
 - **Session page**: trainer name badge; for the trainer the same recorder (live) or summary; *Feedback* panel (session note + comment buttons on entries); the trainee sees feedback read-only.

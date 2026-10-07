@@ -10,7 +10,21 @@ import type { ProfileDatabase, UnitPreferences, UserProfileTable } from '../infr
 
 type Trx = Transaction<ProfileDatabase>;
 
-export interface ProfileUpdate {
+/** Personal details (FR-PRF-01, v1.5). Missing keys stay as they are; null clears an optional value. */
+export interface PersonalDetails {
+  firstName?: string;
+  middleName?: string | null;
+  lastName?: string;
+  mobile?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+}
+
+export interface ProfileUpdate extends PersonalDetails {
   displayName?: string;
   dateOfBirth?: string | null;
   gender?: UserProfileTable['gender'];
@@ -27,10 +41,24 @@ export interface ProfileUpdate {
 }
 
 const DIMENSIONS = ['speed', 'mass', 'length', 'volume', 'pace', 'energy', 'duration'] as const;
+const DETAIL_KEYS = [
+  'firstName',
+  'middleName',
+  'lastName',
+  'mobile',
+  'addressLine1',
+  'addressLine2',
+  'city',
+  'state',
+  'postalCode',
+  'country',
+] as const satisfies readonly (keyof PersonalDetails)[];
 const PROFILE_COLUMNS = [
   'id',
   'email',
   'displayName',
+  ...DETAIL_KEYS,
+  'avatarUpdatedAt',
   'dateOfBirth',
   'gender',
   'heightCm',
@@ -61,6 +89,8 @@ export class ProfileService {
   async me(user: AuthUser) {
     const existing = await this.find(this.db, user.id);
     if (existing) return existing;
+    const name = (user.name ?? user.email?.split('@')[0] ?? 'Athlete').trim();
+    const [first = name, ...rest] = name.split(/\s+/);
     try {
       return await this.db.transaction().execute(async (trx) => {
         await trx
@@ -68,7 +98,18 @@ export class ProfileService {
           .values({
             id: user.id,
             email: user.email ?? null,
-            displayName: (user.name ?? user.email?.split('@')[0] ?? 'Athlete').slice(0, 80),
+            displayName: name.slice(0, 80),
+            firstName: first.slice(0, 60),
+            middleName: null,
+            lastName: rest.join(' ').slice(0, 60) || null,
+            mobile: null,
+            addressLine1: null,
+            addressLine2: null,
+            city: null,
+            state: null,
+            postalCode: null,
+            country: null,
+            avatarUpdatedAt: null,
             dateOfBirth: null,
             gender: null,
             heightCm: null,
@@ -93,12 +134,19 @@ export class ProfileService {
     }
   }
 
-  /** FR-PRF-01/06 (If-Match). Units are preferences only: no stored measurement is ever converted. */
+  /**
+   * FR-PRF-01/06 (If-Match). Units are preferences only: no stored measurement is ever converted.
+   * The display name follows first + last name whenever either changes.
+   */
   async update(user: AuthUser, ifMatch: number | undefined, u: ProfileUpdate) {
     await this.me(user);
     if (u.timezone && !isTimeZone(u.timezone))
       throw ProblemError.validation([
         { pointer: '/body/timezone', code: 'invalid', message: 'Unknown IANA time zone' },
+      ]);
+    if (u.dateOfBirth && (u.dateOfBirth > new Date().toISOString().slice(0, 10) || u.dateOfBirth < '1900-01-01'))
+      throw ProblemError.validation([
+        { pointer: '/body/dateOfBirth', code: 'invalid', message: 'Date of birth must be a past date after 1900' },
       ]);
     return this.db.transaction().execute(async (trx) => {
       await sql`SELECT 1 FROM user_profile WHERE id = ${user.id} FOR UPDATE`.execute(trx);
@@ -111,10 +159,17 @@ export class ProfileService {
           : cur.unitPreferences;
         units = { ...preset, ...u.unitPreferences };
       }
+      const details = Object.fromEntries(DETAIL_KEYS.filter((k) => u[k] !== undefined).map((k) => [k, u[k]]));
+      let displayName = u.displayName;
+      if (u.firstName !== undefined || u.lastName !== undefined) {
+        const full = [u.firstName ?? cur.firstName, u.lastName ?? cur.lastName].filter(Boolean).join(' ');
+        if (full) displayName = full.slice(0, 80);
+      }
       await trx
         .updateTable('userProfile')
         .set({
-          ...(u.displayName !== undefined ? { displayName: u.displayName } : {}),
+          ...(displayName !== undefined ? { displayName } : {}),
+          ...details,
           ...(u.dateOfBirth !== undefined ? { dateOfBirth: u.dateOfBirth } : {}),
           ...(u.gender !== undefined ? { gender: u.gender } : {}),
           ...(u.heightCm !== undefined ? { heightCm: u.heightCm } : {}),
@@ -134,6 +189,50 @@ export class ProfileService {
       await this.emit(trx, EVENT_TYPES.userUpdated, updated);
       return updated;
     });
+  }
+
+  /** Profile picture bytes, or 404. The web app shows it with a cache-busting `?v=avatarUpdatedAt`. */
+  async avatar(user: AuthUser) {
+    const row = await this.db
+      .selectFrom('userAvatar')
+      .select(['contentType', 'data', 'updatedAt'])
+      .where('userId', '=', user.id)
+      .executeTakeFirst();
+    if (!row) throw ProblemError.notFound('Profile picture');
+    return row;
+  }
+
+  /** Optional profile picture (FR-PRF-01): replaces any earlier one. Size and type are checked by the caller. */
+  async setAvatar(user: AuthUser, contentType: 'image/jpeg' | 'image/png' | 'image/webp', data: Buffer) {
+    await this.me(user);
+    return this.db.transaction().execute(async (trx) => {
+      const now = new Date();
+      await trx
+        .insertInto('userAvatar')
+        .values({ userId: user.id, contentType, data, updatedAt: now })
+        .onConflict((oc) => oc.column('userId').doUpdateSet({ contentType, data, updatedAt: now }))
+        .execute();
+      await this.touchAvatar(trx, user.id, now);
+      this.log.info({ userId: user.id, contentType, bytes: data.length }, 'profile picture saved');
+      return (await this.find(trx, user.id))!;
+    });
+  }
+
+  async removeAvatar(user: AuthUser) {
+    return this.db.transaction().execute(async (trx) => {
+      await trx.deleteFrom('userAvatar').where('userId', '=', user.id).execute();
+      await this.touchAvatar(trx, user.id, null);
+      this.log.info({ userId: user.id }, 'profile picture removed');
+      return (await this.find(trx, user.id))!;
+    });
+  }
+
+  private async touchAvatar(trx: Trx, id: string, at: Date | null) {
+    await trx
+      .updateTable('userProfile')
+      .set((eb) => ({ avatarUpdatedAt: at, rowVersion: eb('rowVersion', '+', 1), updatedAt: new Date() }))
+      .where('id', '=', id)
+      .execute();
   }
 
   async devices(user: AuthUser) {
@@ -232,6 +331,8 @@ export class ProfileService {
         .set({
           email: null,
           displayName: 'Deleted user',
+          ...Object.fromEntries(DETAIL_KEYS.map((k) => [k, null])),
+          avatarUpdatedAt: null,
           dateOfBirth: null,
           gender: null,
           heightCm: null,
@@ -243,6 +344,7 @@ export class ProfileService {
         .where('id', '=', user.id)
         .execute();
       await trx.deleteFrom('userDevice').where('userId', '=', user.id).execute();
+      await trx.deleteFrom('userAvatar').where('userId', '=', user.id).execute();
       // Erasure ends every trainer/trainee link (FR-COA-04); other users keep their history rows.
       await trx
         .updateTable('trainerConnection')

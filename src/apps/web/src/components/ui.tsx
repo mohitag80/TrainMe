@@ -83,6 +83,30 @@ export function Badge({
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
+/** Profile picture, or the person's initials on the brand gradient when there is none. */
+export function Avatar({ name, version, size = 36 }: { name: string; version?: string | null; size?: number }) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join('');
+  return version ? (
+    <img
+      className="avatar"
+      src={`/bff/api/v1/profiles/me/avatar?v=${encodeURIComponent(version)}`}
+      alt={name}
+      width={size}
+      height={size}
+      style={{ width: size, height: size, objectFit: 'cover' }}
+    />
+  ) : (
+    <span className="avatar" style={{ width: size, height: size, fontSize: size * 0.38 }} aria-hidden="true">
+      {initials || '?'}
+    </span>
+  );
+}
+
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }

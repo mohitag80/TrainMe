@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import type { CoachingRole } from '@/lib/types';
 
 const ICONS: Record<string, string> = {
   dashboard: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z',
@@ -12,6 +13,8 @@ const ICONS: Record<string, string> = {
   sessions: 'M8 7V3m8 4V3M4 11h16M5 5h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z',
   notifications: 'M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5m6 0a3 3 0 1 1-6 0',
   profile: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 9a7 7 0 0 1 14 0',
+  settings:
+    'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
   subscription: 'M3 10h18M5 6h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z',
   admin: 'M12 3l8 4v5c0 5-3.4 8.7-8 9-4.6-.3-8-4-8-9V7l8-4z',
 };
@@ -22,14 +25,15 @@ const isActive = (path: string, href: string) =>
 
 export function Nav({
   isCurator,
-  isTrainer,
-  canCoach,
+  coachingRole,
   unread,
 }: {
   isCurator: boolean;
-  isTrainer: boolean;
-  /** Technical accounts (admin, curator, support) have no coaching menu at all. */
-  canCoach: boolean;
+  /**
+   * Coaches get Coaching, everyone else who may train with a coach gets My trainers – never both.
+   * Technical accounts (admin, curator, support) have no coaching menu at all.
+   */
+  coachingRole: CoachingRole;
   unread: number;
 }) {
   const path = usePathname();
@@ -38,10 +42,13 @@ export function Nav({
     { href: '/catalog', label: 'Catalog', icon: 'catalog' },
     { href: '/sessions', label: 'Sessions', icon: 'sessions' },
     { href: '/charts', label: 'Charts', icon: 'charts' },
-    ...(canCoach ? [{ href: '/trainers', label: 'My trainers', icon: 'trainers' }] : []),
-    ...(isTrainer ? [{ href: '/coaching', label: 'Coaching', icon: 'coaching' }] : []),
+    ...(coachingRole === 'TRAINEE' || coachingRole === 'NONE'
+      ? [{ href: '/trainers', label: 'My trainers', icon: 'trainers' }]
+      : []),
+    ...(coachingRole === 'TRAINER' ? [{ href: '/coaching', label: 'Coaching', icon: 'coaching' }] : []),
     { href: '/notifications', label: 'Inbox', icon: 'notifications', count: unread },
     { href: '/profile', label: 'Profile', icon: 'profile' },
+    { href: '/settings', label: 'Settings', icon: 'settings' },
     { href: '/subscription', label: 'Plan', icon: 'subscription' },
     ...(isCurator ? [{ href: '/admin', label: 'Admin', icon: 'admin' }] : []),
   ];

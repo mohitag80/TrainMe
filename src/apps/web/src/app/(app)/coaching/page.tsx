@@ -60,6 +60,16 @@ export default function CoachingPage() {
         </Empty>
       </div>
     );
+  if (me.data.coachingRole === 'TRAINEE')
+    return (
+      <div className="stack">
+        <PageHeader title="Coaching" />
+        <Empty>
+          Coaching is for coaches. You train with a coach, so you cannot coach others – see{' '}
+          <Link href="/trainers">My trainers</Link>.
+        </Empty>
+      </div>
+    );
   if (!me.data.isTrainer)
     return (
       <div className="stack">
